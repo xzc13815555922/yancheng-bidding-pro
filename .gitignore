@@ -1,0 +1,18 @@
+# 数据文件（本地采集，不入库）
+data/*.db
+
+# 导出文件
+output/*.xlsx
+output/*.csv
+
+# 日志
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
