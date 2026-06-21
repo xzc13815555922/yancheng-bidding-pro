@@ -2,13 +2,13 @@
 
 盐城市 12 个招标网站的数据采集、富化、分类和导出系统。
 
-**当前版本**：v1.3 | **数据量**：3920 条原始记录 | **最后更新**：2026-06-21
+**当前版本**：v1.4 | **数据量**：3920 条原始记录 | **最后更新**：2026-06-21
 
 ## 覆盖站点（12个）
 
 | 站点 | 说明 | 采集方式 |
 |------|------|--------|
-| jszbcg | 江苏招标采购服务平台（盐城） | REST API + PDF OCR |
+| jszbcg | 江苏招标采购服务平台（盐城） | REST API + PDF→MD |
 | yancheng_gov | 盐城政府采购网 | HTML 详情页 |
 | ycggzy | 盐城公共资源交易平台 | REST API（SPA） |
 | sufu | 苏服采 | REST API |
@@ -46,8 +46,7 @@ crawlers/
   chennan_kaifaqu.py      盐南高新区 + 开发区（共用爬虫）
   bigdata.py / jingkai.py
 
-enrich_details.py         HTML 详情页富化（优先读本地 MD 缓存）
-enrich_jszbcg_ocr.py      PDF OCR 富化（优先读本地 PDF 缓存）
+enrich_details.py         详情页富化（统一读本地 page_path MD，jszbcg 同上）
 add_std_district.py       行政区划打标（std_district）
 add_std_category.py       项目分类打标（proj_major_cat / proj_minor_cat）
 build_unified.py          合并 12 个 DB → data/unified.db
@@ -81,12 +80,12 @@ logs/                     运行日志
 
 ## 本地缓存架构
 
-v1.3 起，所有富化操作均基于本地文件，重跑无需联网：
+v1.4 起，所有富化操作均基于本地 MD 文件，重跑无需联网：
 
-- **jszbcg**：爬虫采集新记录时立即下载 PDF → `data/pdfs/jszbcg/{bulletinID}.pdf`
-- **HTML 站**：爬虫采集详情页时同步保存 Markdown → `data/pages/{site}/{项目名}.md`
-- **enrich_details.py**：优先读 `page_path` 本地 MD；首次拉取后自动缓存
-- **enrich_jszbcg_ocr.py**：优先读 `pdf_path` 本地 PDF；首次下载后自动缓存
+- **jszbcg**：爬虫采集新记录时立即下载 PDF → 转 MD → `data/pages/jszbcg/{项目名}.md`；富化直接读 MD
+- **HTML 站**：爬虫采集详情页时同步保存 Markdown → `data/pages/{site}/{项目名}.md`，富化直接读本地
+- **enrich_details.py**：统一读 `page_path` 本地 MD；首次拉取后自动缓存
+- **sufu**：纯 API，无需页面；**ycggzy**：数据在列表 API 的 raw_json，无需详情页
 
 ## 依赖安装
 
@@ -104,9 +103,8 @@ pip install requests beautifulsoup4 lxml pymupdf paddleocr openpyxl html2text
 # 1. 采集（同步下载 PDF / HTML 页面）
 python3 run_collection.py --days 3
 
-# 2. 富化（读本地缓存，离线运行）
+# 2. 富化（读本地 MD 缓存，离线运行；jszbcg 已在步骤1 PDF→MD）
 python3 enrich_details.py
-python3 enrich_jszbcg_ocr.py
 
 # 3. 打标 + 合并
 python3 add_std_district.py
