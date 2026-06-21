@@ -140,6 +140,22 @@ python3 enrich_yancheng_gov.py
 | HTML 详情页 MD | 1130 个 | `data/pages/{site}/` |
 | jszbcg PDF | 1300 个（616MB） | `data/pdfs/jszbcg/` |
 
+## 系统不变量（verify_quality.py 自动校验）
+
+以下条件必须始终成立；跌破即为回归，必须排查：
+
+| 不变量 | 当前值 | 说明 |
+|--------|-------|------|
+| jszbcg 记录数 ≥ 1300 | 1303 | 采集范围退化则告警 |
+| yancheng_gov 记录数 ≥ 850 | 856 | — |
+| ycggzy 记录数 ≥ 1280 | 1289 | — |
+| sufu purchaser 填充率 ≥ 99% | 100% | 纯 API，无理由低于此 |
+| jszbcg purchaser 填充率 ≥ 95% | ~99.8% | tenderName API 回填 |
+| unified tender/award 各 ≥ 1300 | 1374/1372 | — |
+| unified_total ≥ 非other站记录数 × 95% | ✅ | other=流标/更正/终止，不进 unified |
+
+**运行方式**：`python3 verify_quality.py`（run_daily.sh 7/7 步自动运行）
+
 ## 已知结构性限制
 
 - **sufu 中标人 100% 空**：列表API不含，详情API需登录，无法修复
