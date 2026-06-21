@@ -48,6 +48,18 @@ BUDGET_KEYWORDS = [
     "项目规模", "服务费", "监理费", "工程造价", "项目造价",
     "合同估算价", "合同预估金额", "合同预计金额", "合同预计总金额",
     "估算价", "估算总投资",
+    "标的额", "采购金额", "总服务费", "服务总费用", "总费用",
+    "采购规模", "招标规模", "项目金额", "本次采购金额",
+    "规模", "建设规模", "工程规模",
+]
+# 非关键词触发的 budget 正则（句中直接出现）
+_BUDGET_INLINE_RE = [
+    re.compile(r'不(?:超过|高于)人民币\s*([\d.]+)\s*(万元|亿元|元)'),
+    re.compile(r'约人民币\s*([\d.]+)\s*(万元|亿元|元)'),
+    re.compile(r'(?:本工程|本项目|本次|全费用)约\s*([\d.]+)\s*(万元|亿元|元)'),
+    re.compile(r'标的额约?\s*([\d.]+)\s*(万元|亿元|元)'),
+    re.compile(r'总服务费用不超过\s*([\d.]+)\s*(万元|亿元|元)'),
+    re.compile(r'采购规模[：:\s约]{0,4}([\d.]+)\s*(万元|亿元|元)'),
 ]
 BUDGET_EXCLUDE = ["保证金", "履约金", "押金", "违约金"]
 OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期"]
@@ -93,6 +105,8 @@ def _strip_html(html: str) -> str:
 # 发包单位结尾词（仅保留歧义低的多字或强语义词，排除"部/所/院/委"等高歧义单字）
 _ORG_SUFFIX = (
     r'公司|集团|局|委员会|管委会|政府|中心|学校|医院|协会|基金|银行|事务所|研究院|研究所|大学|学院'
+    r'|办事处|街道办|街道|管理处|管理委员会|部门|办公室'
+    r'|宣传部|财政局|教育局|卫生局|民政局|住建局|自然资源局'
 )
 _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 
@@ -157,6 +171,7 @@ def _parse_datetime(raw: str) -> Optional[str]:
     """尝试将各种日期格式归一化为 'YYYY-MM-DD HH:MM:SS'。"""
     if not raw:
         return None
+    raw = re.sub(r'[*_~`]', '', raw)   # 去除 Markdown 强调符号（chennan 等站点常见）
     raw = re.sub(r'\s+', '', raw)
     patterns = [
         r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:](\d{1,2})分?(\d{1,2})?秒?',
@@ -206,15 +221,18 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                     chunk = _after
                     break
         chunk = re.sub(r'^[^一-龥a-zA-Z0-9]+', '', chunk)
-        # 若chunk内有"名称："子串，直接从该位置提取（处理"采购包1...单位名称：XXX"型）
-        m_name = re.search(r'名称[：:]', chunk)
+        # 在chunk中截断至首个中文列表标记（"一、二、1、"等），避免把项目名内容混入
+        chunk = re.split(r'[一二三四五六七八九十]\s*[、．.]', chunk)[0]
+        # 若chunk内有"名称："子串且在前15字内，直接从该位置提取（处理"采购包1...单位名称：XXX"型）
+        # 但只在名称前文很短时跳转，避免误跳到"采购内容：名称："
+        m_name = re.search(r'^[^，。]{0,15}名称[：:]', chunk)
         if m_name:
             chunk = chunk[m_name.end():]
         # "信息单位名称：" 型标签前缀（fallback）
         chunk = re.sub(r'^(?:信息)?(?:单位|机构|联系|地址)?(?:名称)?\s*[：:]\s*', '', chunk)
         # 合同"甲方：" 型前缀
         chunk = re.sub(r'^[甲乙丙丁][方部]?[）)）]*\s*[：:]\s*', '', chunk)
-        chunk = re.sub(r'^(?:为|是|由|自|经|向|系|即|指|该|此|因|被|对|关|有|其|名|称)\s*', '', chunk)
+        chunk = re.sub(r'^(?:为|是|由|自|经|向|系|即|指|该|此|因|被|对|关|有|其|名|称|本)\s*', '', chunk)
         m = re.match(rf'.{{2,35}}?(?:{_ORG_SUFFIX})', chunk)
         if m:
             val = m.group(0).strip()
@@ -278,6 +296,25 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             result["budget_text"] = chunk[:40]
             break
 
+    # budget inline fallback：句中直接出现金额表达式（无需关键词触发）
+    if "budget" not in result:
+        for pat in _BUDGET_INLINE_RE:
+            m = pat.search(text)
+            if m:
+                raw_num = m.group(1).replace(",", "")
+                try:
+                    v = float(raw_num)
+                    unit_str = m.group(2)
+                    if unit_str in ("万元", "亿元"):
+                        v *= 1e4 if unit_str == "万元" else 1e8
+                    if 100 <= v <= 5e10:
+                        result["budget"] = v
+                        result["budget_unit"] = "元"
+                        result["budget_text"] = m.group(0)[:40]
+                        break
+                except ValueError:
+                    pass
+
     # 时间字段
     if notice_type in ("tender", "other"):
         chunk = _extract_after_keyword(text, OPEN_DATE_KEYWORDS, 40)
@@ -309,6 +346,17 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         if not result.get("deadline"):
             m = re.search(
                 r'于(\d{4}[年\-]\d{1,2}[月\-]\d{1,2}日?\s*\d{1,2}[时:：]\d{2})[^前]{0,5}前',
+                text
+            )
+            if m:
+                dt = _parse_datetime(m.group(1))
+                if dt:
+                    result["deadline"] = dt
+        # fallback: "（投标截止时间）为YYYY年M月D日HH时MM分" 格式（jscn 常见）
+        if not result.get("deadline"):
+            m = re.search(
+                r'[（(]?(?:投标截止时间|截标时间|递交截止时间)[^）)]{0,10}[）)]?\s*为\s*'
+                r'(\d{4}年\d{1,2}月\d{1,2}日?\s*\d{1,2}时\d{0,2})',
                 text
             )
             if m:
