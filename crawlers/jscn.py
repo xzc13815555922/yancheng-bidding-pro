@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.dirname(__file__))
 from base import BaseCrawler, make_id
-from html_common import get_html, infer_notice_type
+from html_common import get_html, infer_notice_type, save_page_md
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from enrich_details import parse_html_detail
@@ -71,8 +71,11 @@ class JscnCrawlerPro(BaseCrawler):
                 record_id = make_id(title, pub_date, self.SITE_NAME)
                 ntype = infer_notice_type(title)
                 enriched = {}
+                enriched = {}
+                page_path = None
                 try:
                     detail_html = get_html(detail_url)
+                    page_path = save_page_md(detail_html, detail_url, self.SITE_KEY, title)
                     enriched = parse_html_detail(detail_html, ntype)
                 except Exception:
                     pass
@@ -94,6 +97,7 @@ class JscnCrawlerPro(BaseCrawler):
                     "region": "盐城市", "district_code": "",
                     "raw_json": json.dumps({}, ensure_ascii=False),
                     "detail_fetched": 1,
+                    "page_path": page_path,
                 }
                 if self.save(record):
                     new += 1

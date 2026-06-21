@@ -5,10 +5,10 @@ outputs:
   - sqlite  # data/unified.db（三张表：tender/award/intention）
   - sqlite  # data/*.db（12个站点独立数据库）
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
-version: v1.2
+version: v1.3
 status: 生产可用
 last_run: 2026-06-21
-records: 3920条原始（12站）→ 发包单位=2892 / 预算=1450 / 中标单位=1257
+records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单位=1230
 ---
 
 # 全域招标信息采集 Pro
@@ -19,19 +19,28 @@ records: 3920条原始（12站）→ 发包单位=2892 / 预算=1450 / 中标单
 
 **覆盖站点**：jszbcg（江苏招标采购服务平台）、yancheng_gov、ycggzy、sufu、yueda、dushi、jscn、chennan、dongfang、bigdata、jingkai、kaifaqu
 
+## 本地缓存架构（v1.3）
+
+所有富化操作均基于本地文件，无需重复联网：
+
+- **jszbcg**：爬虫阶段下载 PDF → `data/pdfs/jszbcg/{bulletinID}.pdf`，OCR 直接读本地
+- **其他 HTML 站**：爬虫阶段保存详情页 → `data/pages/{site}/{项目名}.md`，富化直接读本地
+- **sufu**：纯 API（`announcementResultListNew`），无需页面
+- **ycggzy**：SPA，数据已在列表 API 的 raw_json 中，无需详情页
+- 新增记录：第一次采集时自动下载并缓存，后续富化全走本地
+
 ## 工作流程（6步）
 
 ```bash
 cd ~/.openclaw/workspace/yancheng-bidding-pro
 
-# 第一步：增量采集新记录（近3天）
+# 第一步：增量采集新记录（近3天，同步下载 HTML 页面 / PDF）
 python3 run_collection.py --days 3
 
-# 第二步：HTML 详情页补全（purchaser/budget/open_date/winner）
+# 第二步：HTML 详情页补全（优先读本地 page_path，无则联网并缓存）
 python3 enrich_details.py
 
-# 第三步：jszbcg PDF OCR（只处理新增 award 无 winner / tender 无 budget）
-# 首次全量耗时约 20 分钟，后续增量仅 3-5 分钟
+# 第三步：jszbcg PDF OCR（优先读本地 pdf_path，首次约 20 分钟，后续增量 3-5 分钟）
 python3 enrich_jszbcg_ocr.py
 
 # 第四步：区县标准化（std_district）
@@ -46,9 +55,22 @@ python3 build_unified.py
 # 可选：导出 Excel
 python3 export_excel.py
 
-# 可选：发给 azE
+# 可选：发给用户
 EXCEL=$(ls -t output/*.xlsx | head -1)
 cc-connect send --file "$EXCEL" --message "盐城全域招标数据已更新"
+```
+
+## 补充工具脚本
+
+```bash
+# 批量下载所有站点 HTML 详情页（首次初始化用）
+python3 download_site_pages.py [--site jscn dongfang ...]
+
+# 批量下载 jszbcg 所有 PDF（首次初始化用）
+python3 download_jszbcg_pdfs.py
+
+# 按项目名重命名已有 MD 文件
+python3 rename_pages.py
 ```
 
 ## ycggzy 专用补采（发包单位API补全）
@@ -64,65 +86,87 @@ python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-21
 
 | 字段         | 填充数  | 填充率 |
 |------------|--------|------|
-| purchaser  | 2892   | 74%  |
-| budget     | 1450   | 37%  |
+| purchaser  | 3130   | 80%  |
+| budget     | 1538   | 39%  |
 | open_date  | 1133   | 29%  |
-| winner     | 1257   | 32%  |
+| winner     | 1230   | 31%  |
 | std_district | ~98% | add_std_district.py |
-| std_category | 33%  | 1312/3920，规则持续扩充 |
+| std_category | 33%  | 规则持续扩充 |
 
 ### 各站概况
 
-| 站点        | 条数  | 发包单位 | 预算 | 开标时间 | 中标单位 |
-|-----------|------|--------|-----|--------|--------|
-| jszbcg    | 1303 | 462    | 356 | 558    | 571    |
-| yancheng_gov | 856 | 787  | 255 | 85     | 132    |
-| ycggzy    | 1289 | 1207   | 567 | 344    | 484    |
-| sufu      | 194  | 194    | 194 | 47     | 0      |
-| yueda     | 84   | 77     | 2   | 49     | 23     |
-| dongfang  | 44   | 36     | 18  | 4      | 10     |
-| jscn      | 41   | 38     | 12  | 7      | 12     |
-| dushi     | 35   | 27     | 14  | 19     | 10     |
-| chennan   | 31   | 29     | 15  | 8      | 8      |
-| kaifaqu   | 30   | 23     | 12  | 7      | 2      |
-| bigdata   | 10   | 10     | 4   | 5      | 4      |
-| jingkai   | 3    | 2      | 1   | 0      | 1      |
+| 站点           | 条数   | 发包单位 | 预算 | 开标时间 | 中标单位 |
+|--------------|------|--------|-----|--------|--------|
+| jszbcg       | 1303 | 1300   | 450 | 558    | 544    |
+| yancheng_gov | 856  | 787    | 255 | 85     | 132    |
+| ycggzy       | 1289 | 1207   | 567 | 344    | 484    |
+| sufu         | 194  | 194    | 194 | 47     | 0      |
+| yueda        | 84   | 77     | 2   | 49     | 23     |
+| dongfang     | 44   | 36     | 18  | 4      | 10     |
+| jscn         | 41   | 38     | 12  | 7      | 12     |
+| dushi        | 35   | 27     | 14  | 19     | 10     |
+| chennan      | 31   | 29     | 15  | 8      | 8      |
+| kaifaqu      | 30   | 23     | 12  | 7      | 2      |
+| bigdata      | 10   | 10     | 4   | 5      | 4      |
+| jingkai      | 3    | 2      | 1   | 0      | 1      |
+
+### 本地缓存覆盖
+
+| 类型 | 数量 | 路径 |
+|-----|------|------|
+| HTML 详情页 MD | 1130 个 | `data/pages/{site}/` |
+| jszbcg PDF | 1300 个（616MB） | `data/pdfs/jszbcg/` |
 
 ## 已知结构性限制
 
-- **sufu 中标人 100% 空**：列表API不含，详情API需登录；无法在不提供凭据的情况下修复
-- **yueda 中标金额 100% 空**：页面仅发布候选人推荐公示，不含最终成交金额
-- **ycggzy purchaser** 来自列表API（`reenrich_ycggzy.py`），不走 `enrich_details.py` 的HTML解析
+- **sufu 中标人 100% 空**：列表API不含，详情API需登录，无法修复
+- **yueda 预算 97% 空**：网站公告页本身不披露预算金额
+- **ycggzy purchaser** 来自列表API（`reenrich_ycggzy.py`），不走 `enrich_details.py`
 
 ## 已知遗留问题（待决策）
 
-- **yancheng_gov 10组重复记录**：同名同日期但不同 art_id，均为 other 类型，疑似多标包；is_duplicate 未标记，待用户决定是否合并
+- **yancheng_gov 10组重复记录**：同名同日期不同 art_id，疑似多标包；is_duplicate 未标记
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
-- **std_category 覆盖率仅 12%**：分类规则定义不足
+- **std_category 覆盖率仅 33%**：分类规则定义不足
 
-## 本轮修复清单（2026-06-21）
+## 本轮修复清单（v1.2 → v1.3，2026-06-21）
 
 | # | 问题 | 修复位置 |
 |---|------|---------|
-| 1 | `infer_notice_type` 漏判"中选"→ 中选公示落入 tender | `crawlers/html_common.py` 加 `"中选"` |
-| 2 | `enrich_details.py` WHERE `detail_fetched=0` 漏掉 NULL 记录 | 改为 `IS NULL OR =0` |
-| 3 | `base.py` INSERT 时 detail_fetched 写 NULL | 改为 `record.get("detail_fetched", 0)` |
-| 4 | yancheng_gov `<!--标题-->` 占位符导致标题乱码（141条） | `_parse_page` 加校验 + `_fetch_detail_title` 从 `<title>` 取标题 |
-| 5 | yancheng_gov 被误判为需 Playwright，详情页全部跳过 | 确认 requests 可访问，移除 Playwright-skip block，加入 html_sites |
-| 6 | purchaser 漏采"单位名称"标签 | `PURCHASER_KEYWORDS` 加 `"单位名称"` |
-| 7 | 政府/管委会类发包单位被 `_ORG_SUFFIX` 漏匹配 | 加 `政府\|管委会` |
-| 8 | 都市发包单位在 `<meta name="description">` 中，HTML strip 后丢失 | `_strip_html` 提取 meta description 并拼接到末尾 |
-| 9 | 叙述句式发包单位无法提取 | `enrich_details.py` 加三种 fallback regex 格式 |
-| 10 | ycggzy 成交公告 winner 漏采（多列供应商名称表格） | `crawlers/ycggzy.py` 加 BeautifulSoup 多列表格解析 |
-| 11 | ycggzy transactionInfo-7（国有产权）未采集 | CLASS_CODES 启用，reenrich 覆盖 |
-| 12 | ycggzy section/notice_type_raw 新增记录自动回填 | `run_collection.py` `_repair_derived_fields()` |
-| 13 | jszbcg OCR 跳过 tender purchaser 未补全记录 | `enrich_jszbcg_ocr.py` WHERE 加 `purchaser IS NULL` |
-| 14 | dongfang 预算/发包人抓取失败 | `enrich_details.py` 加"限价"/"发包人"/"关于"前缀清除/首句主语模式 |
-| 15 | jszbcg 站点名称错误 | 全局替换为"江苏招标采购服务平台" |
+| 16 | jszbcg purchaser 0%（SPA 无法解析 HTML） | `enrich_jszbcg_ocr.py` 从 Detail API tenderName 回填 |
+| 17 | OCR budget 漏匹配"约"前缀（"预算金额约81万元"） | `_parse_ocr_text` regex 改 `[：:\s约]{0,3}` + `parse_html_detail` 双引擎兜底 |
+| 18 | jszbcg PDF 未本地缓存，OCR 每次重新下载 | `download_jszbcg_pdfs.py` 全量下载；`enrich_jszbcg_ocr.py` 优先读 `pdf_path` |
+| 19 | HTML 详情页未本地缓存，富化每次联网 | `crawlers/html_common.py` 加 `save_page_md()`；7 个爬虫爬取时同步保存 MD |
+| 20 | `enrich_details.py` 重富化每次重新请求网络 | 优先读 `page_path` 本地 MD；网络拉取后自动缓存 |
+| 21 | jszbcg 新记录需手动单独下载 PDF | `crawlers/jszbcg.py` 新记录 save 后立即调 `_download_pdf()` |
+| 22 | `base.py` schema 缺 `page_path`/`pdf_path` | 新增列 + 自动迁移 + INSERT 带这两列 |
+| 23 | 本地 MD 文件按 UUID 命名，难以管理 | `rename_pages.py` 按项目名批量重命名；新爬虫直接以项目名命名 |
+| 24 | sufu 详情页是 SPA，193 个无效 MD 文件 | 删除无效文件，清除 DB page_path；sufu 已是纯 API 无需页面 |
+| 25 | 土地承包/延长30年 未归类 | `add_std_category.py` 加入"土地承包""延长30年""延包试点"→土地处置 |
+
+## v1.2 修复清单（参考）
+
+| # | 问题 | 修复位置 |
+|---|------|---------|
+| 1 | `infer_notice_type` 漏判"中选" | `html_common.py` |
+| 2 | `detail_fetched=0` WHERE 漏 NULL | `enrich_details.py` |
+| 3 | `base.py` INSERT detail_fetched 写 NULL | `base.py` |
+| 4 | yancheng_gov 标题占位符乱码（141条） | `crawlers/yancheng_gov.py` |
+| 5 | yancheng_gov 误判需 Playwright | `enrich_details.py` |
+| 6 | purchaser 漏采"单位名称"标签 | `enrich_details.py` |
+| 7 | 政府/管委会类被 `_ORG_SUFFIX` 漏匹配 | `enrich_details.py` |
+| 8 | 都市发包单位在 meta description 中 | `enrich_details.py` |
+| 9 | 叙述句式发包单位无法提取 | `enrich_details.py` |
+| 10 | ycggzy 成交公告 winner 漏采多列表格 | `crawlers/ycggzy.py` |
+| 11 | ycggzy transactionInfo-7 未采集 | `crawlers/ycggzy.py` |
+| 12 | ycggzy section/notice_type_raw 新增未回填 | `run_collection.py` |
+| 13 | jszbcg OCR 跳过 tender purchaser 未补全记录 | `enrich_jszbcg_ocr.py` |
+| 14 | dongfang 预算/发包人抓取失败 | `enrich_details.py` |
+| 15 | jszbcg 站点名称错误 | 全局替换 |
 
 ## 注意事项
 
-- jszbcg OCR：图片型 PDF ~40s/条，tombstone 保护（每条只 OCR 一次）
-- 增量运行时 OCR 很快（新增 10-20 条 × 50% 图片 ≈ 3-5 分钟）
-- yancheng_gov 现在 **不需要 Playwright**，requests 直接访问（2026-06-20 确认）
+- jszbcg OCR：图片型 PDF ~40s/条；增量运行只处理新增记录，很快
+- 本地缓存后，`enrich_details.py` 和 `enrich_jszbcg_ocr.py` 重跑不联网
 - `build_unified.py` 会覆写 `data/unified.db`；各站 *.db 保留原始数据
+- `data/` 目录（含 DB、PDF、MD 文件）已加入 `.gitignore`，不随代码提交

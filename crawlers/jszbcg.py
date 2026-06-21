@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
@@ -23,8 +24,10 @@ logger = logging.getLogger(__name__)
 os.environ.setdefault("NO_PROXY", "*")
 os.environ.setdefault("no_proxy", "*")
 
-API_BASE = "https://api.jszbtb.com/DataGatewayApi/PublishBulletins"
-SITE_URL = "https://www.jszbcg.com"
+API_BASE   = "https://api.jszbtb.com/DataGatewayApi/PublishBulletins"
+DETAIL_API = "https://api.jszbtb.com/DataGatewayApi/BulletinDetail/{bid_id}"
+SITE_URL   = "https://www.jszbcg.com"
+PDF_DIR    = Path(__file__).parent.parent / "data" / "pdfs" / "jszbcg"
 
 # bulletinType → notice_type 映射
 BULLETIN_TYPE_MAP = {
@@ -82,8 +85,18 @@ class JSZbcgCrawlerPro(BaseCrawler):
             for raw in records:
                 record = self._map_record(raw, notice_type, type_label)
                 if record:
-                    if self.save(record):
+                    is_new = self.save(record)
+                    if is_new:
                         new += 1
+                        bid_id = raw.get("bulletinID", "")
+                        if bid_id:
+                            pdf_path = self._download_pdf(bid_id)
+                            if pdf_path:
+                                self.db._get_conn().execute(
+                                    "UPDATE notices SET pdf_path=? WHERE id=?",
+                                    (pdf_path, record["id"])
+                                )
+                                self.db._get_conn().commit()
                     total += 1
 
             total_pages = data.get("totalPage", 1) or 1
@@ -127,6 +140,25 @@ class JSZbcgCrawlerPro(BaseCrawler):
         except Exception as e:
             logger.error(f"    请求异常: {e}")
         return None
+
+    def _download_pdf(self, bid_id: str) -> str:
+        """调 Detail API 取 signPdfUrl，下载 PDF 到本地。返回本地路径，失败返回空字符串。"""
+        try:
+            PDF_DIR.mkdir(parents=True, exist_ok=True)
+            pdf_file = PDF_DIR / f"{bid_id}.pdf"
+            if pdf_file.exists() and pdf_file.stat().st_size > 1000:
+                return str(pdf_file)
+            r = requests.get(DETAIL_API.format(bid_id=bid_id), headers=HEADERS, timeout=10)
+            pdf_url = (r.json().get("data") or {}).get("signPdfUrl", "")
+            if not pdf_url:
+                return ""
+            pr = requests.get(pdf_url, headers=HEADERS, timeout=30)
+            if len(pr.content) < 1000:
+                return ""
+            pdf_file.write_bytes(pr.content)
+            return str(pdf_file)
+        except Exception:
+            return ""
 
     def _map_record(self, raw: Dict, notice_type: str, type_label: str) -> Optional[Dict]:
         """将 API 原始 23 列映射到标准 schema + 保留 raw_json。"""

@@ -55,7 +55,9 @@ class SiteDB:
         district_code   TEXT,
         raw_json        TEXT,            -- 完整原始 API 字段，JSON 序列化
         detail_fetched  INTEGER DEFAULT 0,  -- 0=待补全 1=已补全 2=补全失败
-        is_duplicate    INTEGER DEFAULT 0
+        is_duplicate    INTEGER DEFAULT 0,
+        page_path       TEXT,            -- 本地缓存的详情页 MD 文件路径
+        pdf_path        TEXT             -- 本地缓存的 PDF 文件路径（jszbcg）
     );
     CREATE INDEX IF NOT EXISTS idx_publish_date ON notices(publish_date);
     CREATE INDEX IF NOT EXISTS idx_notice_type  ON notices(notice_type);
@@ -77,6 +79,16 @@ class SiteDB:
             if stmt:
                 conn.execute(stmt)
         conn.commit()
+        # 迁移：为已有 DB 补列（忽略已存在的错误）
+        for col_def in [
+            "page_path TEXT", "pdf_path TEXT",
+            "std_district TEXT", "proj_minor_cat TEXT", "proj_major_cat TEXT",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE notices ADD COLUMN {col_def}")
+                conn.commit()
+            except Exception:
+                pass
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -107,7 +119,7 @@ class SiteDB:
                         region=:region, district_code=:district_code,
                         detail_url=:detail_url, source_url=:source_url,
                         raw_json=:raw_json, detail_fetched=:detail_fetched,
-                        section=COALESCE(:section, section)
+                        page_path=COALESCE(:page_path, page_path)
                     WHERE id=:id
                 """, record)
             else:
@@ -120,7 +132,7 @@ class SiteDB:
                         region=:region, district_code=:district_code,
                         detail_url=:detail_url, source_url=:source_url,
                         raw_json=:raw_json,
-                        section=COALESCE(:section, section)
+                        page_path=COALESCE(:page_path, page_path)
                     WHERE id=:id
                 """, record)
             conn.commit()
@@ -131,7 +143,7 @@ class SiteDB:
                 "publish_date", "project_name", "budget", "budget_text", "budget_unit",
                 "purchaser", "purchaser_raw", "open_date", "deadline", "expected_list",
                 "winner", "winning_amount", "region", "district_code", "raw_json",
-                "detail_fetched",
+                "detail_fetched", "page_path", "pdf_path",
             ]
             placeholders = ", ".join(f":{c}" for c in cols)
             conn.execute(

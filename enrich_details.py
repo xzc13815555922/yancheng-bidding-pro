@@ -423,7 +423,7 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
     db = SiteDB(site_key)
     conn = db._get_conn()
 
-    q = "SELECT id, detail_url, notice_type, raw_json, budget, budget_unit, deadline, purchaser_raw FROM notices WHERE detail_fetched IS NULL OR detail_fetched=0"
+    q = "SELECT id, detail_url, notice_type, raw_json, budget, budget_unit, deadline, purchaser_raw, page_path FROM notices WHERE detail_fetched IS NULL OR detail_fetched=0"
     if limit:
         q += f" LIMIT {limit}"
     rows = conn.execute(q).fetchall()
@@ -456,27 +456,52 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
         elif site_key == "sufu":
             fields = enrich_from_raw_json_sufu(raw_json, row)
 
-        # ── HTML 类站：HTTP 抓详情页 ──
+        # ── HTML 类站：优先读本地缓存 page_path，否则 HTTP 抓 ──
         elif detail_url:
-            try:
-                resp = session.get(detail_url, timeout=15)
-                if resp.status_code == 403:
-                    logger.debug(f"  403: {detail_url[:60]}")
-                    status = 2  # 需要 Playwright，标记跳过
-                elif resp.status_code == 200:
-                    enc = resp.apparent_encoding or "utf-8"
-                    try:
-                        html = resp.content.decode(enc, errors="replace")
-                    except Exception:
-                        html = resp.text
-                    fields = parse_html_detail(html, ntype)
-                else:
+            page_path = row["page_path"] if "page_path" in row.keys() else None
+            local_file = Path(page_path) if page_path else None
+            if local_file and local_file.exists():
+                # 本地 MD 文件（已是纯文本，直接解析）
+                try:
+                    text = local_file.read_text(encoding="utf-8")
+                    fields = parse_html_detail(text, ntype)
+                except Exception as e:
+                    logger.debug(f"  读本地文件失败: {e}")
                     status = 2
-            except Exception as e:
-                logger.debug(f"  请求异常 {site_key} {detail_url[:60]}: {e}")
-                status = 2
-
-            time.sleep(0.5)
+            else:
+                try:
+                    resp = session.get(detail_url, timeout=15)
+                    if resp.status_code == 403:
+                        logger.debug(f"  403: {detail_url[:60]}")
+                        status = 2
+                    elif resp.status_code == 200:
+                        enc = resp.apparent_encoding or "utf-8"
+                        try:
+                            html = resp.content.decode(enc, errors="replace")
+                        except Exception:
+                            html = resp.text
+                        fields = parse_html_detail(html, ntype)
+                        # 保存本地缓存
+                        try:
+                            sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
+                            from html_common import save_page_md
+                            title = conn.execute(
+                                "SELECT project_name FROM notices WHERE id=?", (rid,)
+                            ).fetchone()["project_name"]
+                            saved = save_page_md(html, detail_url, site_key, title)
+                            if saved:
+                                conn.execute(
+                                    "UPDATE notices SET page_path=? WHERE id=?", (saved, rid)
+                                )
+                                conn.commit()
+                        except Exception:
+                            pass
+                    else:
+                        status = 2
+                except Exception as e:
+                    logger.debug(f"  请求异常 {site_key} {detail_url[:60]}: {e}")
+                    status = 2
+                time.sleep(0.5)
         else:
             status = 2  # 无 detail_url
 

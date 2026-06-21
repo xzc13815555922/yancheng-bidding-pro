@@ -232,38 +232,63 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
             skip += 1
             continue
 
-        # ── 1. 获取 Detail API（取 PDF URL + tenderName 发包单位）──
-        try:
-            r = sess.get(DETAIL_API.format(bid_id=bid_id), timeout=10)
-            detail_data = r.json().get("data") or {}
-            pdf_url = detail_data.get("signPdfUrl", "")
-            tender_name = detail_data.get("tenderName") or ""
-        except Exception as e:
-            logger.info(f"  → Detail API 失败: {e}")
-            fail += 1
-            continue
+        # ── 1. 获取 PDF（优先本地，否则调 Detail API 下载）──
+        existing_pdf = conn.execute(
+            "SELECT pdf_path FROM notices WHERE id=?", (rid,)
+        ).fetchone()
+        local_pdf = existing_pdf["pdf_path"] if existing_pdf and existing_pdf["pdf_path"] else None
+        local_path = Path(local_pdf) if local_pdf else None
 
-        # 从 tenderName 回填 purchaser（无论有无 PDF，覆盖所有类型）
-        if tender_name:
-            conn.execute(
-                "UPDATE notices SET purchaser=COALESCE(purchaser, ?) WHERE id=?",
-                (tender_name[:50], rid)
-            )
-            conn.commit()
+        if local_path and local_path.exists() and local_path.stat().st_size > 1000:
+            try:
+                pdf_bytes = local_path.read_bytes()
+                tender_name = ""  # 已有本地文件，跳过 Detail API
+            except Exception as e:
+                logger.info(f"  → 读本地PDF失败: {e}")
+                fail += 1
+                continue
+        else:
+            try:
+                r = sess.get(DETAIL_API.format(bid_id=bid_id), timeout=10)
+                detail_data = r.json().get("data") or {}
+                pdf_url = detail_data.get("signPdfUrl", "")
+                tender_name = detail_data.get("tenderName") or ""
+            except Exception as e:
+                logger.info(f"  → Detail API 失败: {e}")
+                fail += 1
+                continue
 
-        if not pdf_url:
-            logger.info(f"  → 跳过: 无PDF链接")
-            skip += 1
-            continue
+            # 从 tenderName 回填 purchaser
+            if tender_name:
+                conn.execute(
+                    "UPDATE notices SET purchaser=COALESCE(purchaser, ?) WHERE id=?",
+                    (tender_name[:50], rid)
+                )
+                conn.commit()
 
-        # ── 2. 下载 PDF ──
-        try:
-            pr = sess.get(pdf_url, timeout=30)
-            pdf_bytes = pr.content
-        except Exception as e:
-            logger.info(f"  → PDF下载失败: {e}")
-            fail += 1
-            continue
+            if not pdf_url:
+                logger.info(f"  → 跳过: 无PDF链接")
+                skip += 1
+                continue
+
+            try:
+                pr = sess.get(pdf_url, timeout=30)
+                pdf_bytes = pr.content
+                # 保存到本地
+                try:
+                    from pathlib import Path as _P
+                    _pdf_dir = _P(__file__).parent / "data" / "pdfs" / "jszbcg"
+                    _pdf_dir.mkdir(parents=True, exist_ok=True)
+                    _pf = _pdf_dir / f"{bid_id}.pdf"
+                    _pf.write_bytes(pdf_bytes)
+                    conn.execute("UPDATE notices SET pdf_path=? WHERE id=?", (str(_pf), rid))
+                    conn.commit()
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.info(f"  → PDF下载失败: {e}")
+                fail += 1
+                continue
 
         if len(pdf_bytes) < 5000:
             logger.info(f"  → 跳过: PDF过小({len(pdf_bytes)}B)")

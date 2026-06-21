@@ -1,5 +1,7 @@
 # 数据文件（本地采集，不入库）
 data/*.db
+data/pdfs/
+data/pages/
 
 # 导出文件
 output/*.xlsx

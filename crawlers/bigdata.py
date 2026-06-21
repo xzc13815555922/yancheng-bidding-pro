@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 sys.path.insert(0, os.path.dirname(__file__))
 from base import BaseCrawler, make_id
-from html_common import get_html, infer_notice_type, extract_date
+from html_common import get_html, infer_notice_type, extract_date, save_page_md
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from enrich_details import parse_html_detail
@@ -76,9 +76,12 @@ class BigdataCrawlerPro(BaseCrawler):
             for title, detail_url in items:
                 total += 1
                 enriched = {}
+                enriched = {}
+                page_path = None
                 pub_date = ""
                 try:
                     detail_html = get_html(detail_url)
+                    page_path = save_page_md(detail_html, detail_url, self.SITE_KEY, title)
                     # extract date from detail page .time element
                     dsoup = BeautifulSoup(detail_html, "lxml")
                     time_el = dsoup.find(class_="time")
@@ -111,6 +114,7 @@ class BigdataCrawlerPro(BaseCrawler):
                     "region": "盐南高新区", "district_code": "",
                     "raw_json": json.dumps({"cat": cat_name}, ensure_ascii=False),
                     "detail_fetched": 1,
+                    "page_path": page_path,
                 }
                 if self.save(record):
                     new += 1
