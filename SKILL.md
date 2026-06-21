@@ -63,22 +63,45 @@ cc-connect send --file "$EXCEL" --message "盐城全域招标数据已更新"
 ## 补充工具脚本
 
 ```bash
-# 批量下载所有站点 HTML 详情页（首次初始化用）
+# 批量下载所有站点 HTML 详情页（首次初始化用，断点续传）
 python3 download_site_pages.py [--site jscn dongfang ...]
 
-# 批量下载 jszbcg 所有 PDF（首次初始化用）
+# 批量下载 jszbcg 所有 PDF（首次初始化用，断点续传）
 python3 download_jszbcg_pdfs.py
 
 # 按项目名重命名已有 MD 文件
 python3 rename_pages.py
 ```
 
-## ycggzy 专用补采（发包单位API补全）
+## ycggzy 专用补采（发包单位 API 补全）
 
 ```bash
-# ycggzy 是 JS SPA，purchaser 来自列表API，不走 enrich_details
+# ycggzy 是 SPA，purchaser 来自列表 API，不走 enrich_details
 python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-21
 ```
+
+## yancheng_gov Playwright 补全（按需）
+
+yancheng_gov 部分记录因 WAF 返回 403，requests 抓不到，需 Playwright：
+
+```bash
+# 轻量版：只处理 detail_fetched=2 的失败记录
+python3 enrich_yancheng_gov_playwright.py
+
+# 完整版：Playwright + 表格专项解析，补全率更高
+python3 enrich_yancheng_gov.py
+```
+
+> 注：大多数 yancheng_gov 记录已能被 requests 直接访问（2026-06-20 确认），
+> 只有少量高流量时段的请求需要 Playwright 重试。
+
+## 调试 / 历史工具（非生产流程）
+
+| 脚本 | 说明 | 状态 |
+|------|------|------|
+| `dry_run_v2.py` | 分类规则只读调试，验证 RULES 命中情况 | 按需 |
+| `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
+| `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
 ## 数据质量现状（2026-06-21）
 

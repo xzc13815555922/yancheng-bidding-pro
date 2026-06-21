@@ -55,9 +55,19 @@ export_excel.py           导出 Excel
 run_collection.py         采集入口（支持 --days / --site）
 run_daily.sh              每日全流程脚本（凌晨 2 点）
 
-download_jszbcg_pdfs.py   jszbcg PDF 历史批量下载（初始化用）
-download_site_pages.py    HTML 站详情页历史批量下载（初始化用）
-rename_pages.py           按项目名重命名 MD 缓存文件
+download_jszbcg_pdfs.py        jszbcg PDF 历史批量下载（初始化用）
+download_site_pages.py         HTML 站详情页历史批量下载（初始化用）
+rename_pages.py                按项目名重命名 MD 缓存文件
+reenrich_ycggzy.py             ycggzy 专项补采（发包单位从列表 API 回填）
+
+# yancheng_gov 专项工具（Playwright，按需运行）
+enrich_yancheng_gov.py         yancheng_gov 完整补全（Playwright + 表格专项解析）
+enrich_yancheng_gov_playwright.py  yancheng_gov 轻量补全（只处理 detail_fetched=2 的记录）
+
+# 调试 / 历史工具（不属于生产流程）
+dry_run_v2.py                  分类规则调试（只读，不写 DB）
+fix_titles.py                  修复 yancheng_gov 乱码标题（一次性，已用完）
+migrate_from_old.py            从旧 history.db 迁移数据（一次性，已用完）
 
 data/
   *.db                    各站点独立 SQLite 数据库
@@ -125,6 +135,25 @@ python3 run_collection.py --days 7 --site jscn
 
 # 只富化某个站点
 python3 -c "from enrich_details import enrich_site; enrich_site('jscn')"
+```
+
+### yancheng_gov Playwright 补全（WAF 绕过，按需）
+
+yancheng_gov 部分记录因知道创宇 WAF 返回 403，需 Playwright 补全：
+
+```bash
+# 轻量版（只处理 detail_fetched=2 的记录）
+python3 enrich_yancheng_gov_playwright.py
+
+# 完整版（含表格专项解析，补全率更高）
+python3 enrich_yancheng_gov.py
+```
+
+### ycggzy 补采
+
+```bash
+# ycggzy 是 SPA，purchaser 来自列表 API，不走 enrich_details
+python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-21
 ```
 
 ## 分类体系
