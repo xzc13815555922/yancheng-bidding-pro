@@ -6,9 +6,9 @@ outputs:
   - sqlite  # data/*.db（12个站点独立数据库）
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
-version: v1.5
+version: v1.6
 status: 生产可用
-last_run: 2026-06-21
+last_run: 2026-06-22
 records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单位=1230
 ---
 
@@ -115,7 +115,7 @@ python3 enrich_yancheng_gov.py
 | open_date  | 1133   | 29%  |
 | winner     | 1230   | 31%  |
 | std_district | ~98% | add_std_district.py |
-| std_category | 45%  | 规则持续扩充 |
+| std_category | 47%  | 规则持续扩充 |
 
 ### 各站概况
 
@@ -168,6 +168,16 @@ python3 enrich_yancheng_gov.py
 - **yancheng_gov 10组重复记录**：同名同日期不同 art_id，疑似多标包；is_duplicate 未标记
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
 - **std_category 覆盖率 45%**：规则持续扩充中
+
+## 本轮修复清单（v1.5 → v1.6，2026-06-22）
+
+| # | 问题 | 修复位置 |
+|---|------|---------|
+| 32 | 化粪池清运/管网疏通未归类 | `add_std_category.py` 垃圾与环卫加入"化粪池"/"管网疏通"/"管道疏通"/"下水道疏通" |
+| 33 | 房屋招租被"数字化交易云平台"误杀（must_not误匹配平台名）| `add_std_category.py` 房屋招租 must_not 去掉"数字化" |
+| 34 | 电梯年度检验/维护未归类（"检验"非"检测"，词不连续）| `add_std_category.py` 电梯服务加入"电梯检验"/"电梯年检"/"电梯年度检验"/"电梯维护" |
+| 35 | std_category 覆盖率 45%→47% | 合计新增覆盖8条，1844/3920 |
+| 36 | 月报格式重构 | `generate_tender_report.py`：汇总表合并今日/前日列、新增当月已分类列；明细页去掉网站列加发布日期列、展示未分类（潜在商机）项目；汇总表下方加分类说明 |
 
 ## 本轮修复清单（v1.4 → v1.5，2026-06-21）
 

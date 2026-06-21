@@ -27,9 +27,6 @@ UNIFIED_DB = Path(__file__).parent / "data" / "unified.db"
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-DISTRICTS = ("盐南", "经开")
-
-# 固定排序（与 bidding-assistant 保持一致）
 SITE_ORDER = [
     "盐城政府网",
     "苏服务",
@@ -45,7 +42,6 @@ SITE_ORDER = [
     "江苏招标采购服务平台",
 ]
 
-# 各网站筛选策略说明
 SITE_FILTER = {
     "盐城政府网":       "区域关键词筛选（盐南高新区、经开区）",
     "苏服务":           "选择区域（经开区、盐南高新区）",
@@ -106,7 +102,8 @@ def _query(sql: str, params=()):
     return [dict(r) for r in rows]
 
 
-def site_count(site: str, date: str) -> int:
+def site_count_unclassified(site: str, date: str) -> int:
+    """当日/前一日 未分类数"""
     rows = _query(
         "SELECT COUNT(*) AS n FROM tender "
         "WHERE site_name=? AND publish_date=? "
@@ -118,13 +115,13 @@ def site_count(site: str, date: str) -> int:
 
 
 def month_records(first: str, last: str) -> List[dict]:
+    """当月全量（含分类/未分类），用于汇总统计"""
     return _query(
         "SELECT site_name, publish_date, project_name, purchaser, "
-        "budget, open_date, detail_url "
+        "budget, open_date, detail_url, proj_major_cat, proj_minor_cat "
         "FROM tender "
         "WHERE std_district IN ('盐南','经开') "
         "  AND publish_date BETWEEN ? AND ? "
-        "  AND proj_major_cat IS NULL "
         "ORDER BY publish_date DESC, site_name, project_name",
         (first, last)
     )
@@ -133,11 +130,10 @@ def month_records(first: str, last: str) -> List[dict]:
 # ---------- 页面构建 ----------
 
 def page1_summary(f: str, report_month: str, first: str, last: str,
-                  today: str, yesterday: str, records: List[dict]) -> list:
+                  today: str, yesterday: str, all_records: List[dict]) -> list:
     """第1页：招标公告汇总表"""
     story = []
 
-    # 标题
     t1 = _style(f, "T1", parent="Heading1", fontSize=20, textColor=DARK_BLUE,
                 alignment=TA_CENTER, spaceAfter=0.2*cm)
     t2 = _style(f, "T2", fontSize=11, alignment=TA_CENTER,
@@ -150,55 +146,60 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
         t2
     ))
 
-    # 表头
-    h = _style(f, "SH", fontSize=9, alignment=TA_CENTER,
-               textColor=colors.white, leading=12)
-    cv = _style(f, "SV", fontSize=9, alignment=TA_CENTER, leading=12)
-    cl = _style(f, "SL", fontSize=8.5, alignment=TA_LEFT, leading=11)
+    h  = _style(f, "SH",  fontSize=8.5, alignment=TA_CENTER,
+                textColor=colors.white, leading=12)
+    cv = _style(f, "SV",  fontSize=9,   alignment=TA_CENTER, leading=12)
+    cl = _style(f, "SL",  fontSize=8,   alignment=TA_LEFT,   leading=11)
 
-    # 当月统计（按网站）
-    month_by_site = defaultdict(int)
-    for r in records:
-        month_by_site[r["site_name"]] += 1
+    # 按网站统计当月未分类 / 已分类
+    month_unclassified = defaultdict(int)
+    month_classified   = defaultdict(int)
+    for r in all_records:
+        if r["proj_major_cat"] is None:
+            month_unclassified[r["site_name"]] += 1
+        else:
+            month_classified[r["site_name"]] += 1
 
     tbl_data = [[
         Paragraph("网站名称", h),
-        Paragraph(f"当日发布数\n{today}", h),
-        Paragraph(f"前一日发布数\n{yesterday}", h),
-        Paragraph(f"当月发布数\n({report_month})", h),
+        Paragraph(f"当日/前一日\n发布数（未分类）\n今:{today[5:]} 昨:{yesterday[5:]}", h),
+        Paragraph(f"当月发布数\n（未分类）\n{report_month}", h),
+        Paragraph(f"当月发布数\n（已分类）\n{report_month}", h),
         Paragraph("数据筛选逻辑", h),
     ]]
 
-    total_today = total_yest = total_month = 0
+    total_td = total_yd = total_unc = total_cls = 0
 
     for site in SITE_ORDER:
-        td = site_count(site, today)
-        yd = site_count(site, yesterday)
-        md = month_by_site.get(site, 0)
-        total_today  += td
-        total_yest   += yd
-        total_month  += md
-        filter_desc = SITE_FILTER.get(site, "—")
+        td  = site_count_unclassified(site, today)
+        yd  = site_count_unclassified(site, yesterday)
+        unc = month_unclassified.get(site, 0)
+        cls = month_classified.get(site, 0)
+        total_td  += td
+        total_yd  += yd
+        total_unc += unc
+        total_cls += cls
+
+        td_yd_str = f"{td} / {yd}" if (td or yd) else "—"
         tbl_data.append([
             Paragraph(site, _style(f, f"sn{site}", fontSize=9, alignment=TA_LEFT, leading=12)),
-            Paragraph(str(td) if td else "—", cv),
-            Paragraph(str(yd) if yd else "—", cv),
-            Paragraph(str(md) if md else "—", cv),
-            Paragraph(filter_desc, cl),
+            Paragraph(td_yd_str, cv),
+            Paragraph(str(unc) if unc else "—", cv),
+            Paragraph(str(cls) if cls else "—", cv),
+            Paragraph(SITE_FILTER.get(site, "—"), cl),
         ])
 
-    # 合计行
     tbl_data.append([
         Paragraph("合计", _style(f, "tot", fontSize=9, alignment=TA_CENTER, leading=12)),
-        Paragraph(str(total_today)  if total_today  else "—", cv),
-        Paragraph(str(total_yest)   if total_yest   else "—", cv),
-        Paragraph(str(total_month), cv),
+        Paragraph(f"{total_td} / {total_yd}" if (total_td or total_yd) else "—", cv),
+        Paragraph(str(total_unc) if total_unc else "—", cv),
+        Paragraph(str(total_cls) if total_cls else "—", cv),
         Paragraph("—", cv),
     ])
 
-    tbl = Table(tbl_data, colWidths=[3.8*cm, 2.2*cm, 2.5*cm, 2.5*cm, 6.5*cm], repeatRows=1)
+    tbl = Table(tbl_data, colWidths=[3.5*cm, 2.8*cm, 2.3*cm, 2.3*cm, 6.6*cm], repeatRows=1)
     tbl.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, 0),  DARK_BLUE),
+        ("BACKGROUND",    (0, 0),  (-1, 0),  DARK_BLUE),
         ("BACKGROUND",    (0, -1), (-1, -1), LIGHT_BLUE),
         ("ROWBACKGROUNDS",(0, 1),  (-1, -2), [colors.white, ROW_ALT]),
         ("GRID",          (0, 0),  (-1, -1), 0.3, colors.grey),
@@ -209,16 +210,31 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
         ("RIGHTPADDING",  (0, 0),  (-1, -1), 4),
     ]))
     story.append(tbl)
+
+    note = _style(f, "NOTE", fontSize=8.5, textColor=colors.HexColor("#444444"),
+                  leading=13, spaceBefore=0.35*cm)
+    story.append(Paragraph(
+        '【分类说明】“当月已分类”项目已通过关键词规则标注标准大类/小类'
+        '（如：建设工程、物业服务、法律服务、车辆采购、IT设备、'
+        '设计服务、垃圾与环卫、电梯服务等），'
+        '表示该类项目与公司业务方向不相关，已从商机池中剖除，仅作统计留存。'
+        '明细清单页仅展示“已分类”项目供参考；“未分类”项目为待人工研判的潜在商机。',
+        note
+    ))
     return story
 
 
-def detail_pages(f: str, records: List[dict]) -> list:
-    """第2页起：每个网站一页招标公告清单"""
+def detail_pages(f: str, all_records: List[dict]) -> list:
+    """第2页起：每个网站一页，只显示已分类项目"""
     story = []
 
     by_site: Dict[str, List[dict]] = defaultdict(list)
-    for r in records:
-        by_site[r["site_name"]].append(r)
+    for r in all_records:
+        if r["proj_major_cat"] is None:  # 只显示未分类（潜在商机）
+            by_site[r["site_name"]].append(r)
+
+    if not by_site:
+        return story
 
     sorted_sites = sorted(by_site.keys(),
                           key=lambda s: SITE_ORDER.index(s) if s in SITE_ORDER else 99)
@@ -237,8 +253,8 @@ def detail_pages(f: str, records: List[dict]) -> list:
         story.append(Paragraph(f"▌ {site}　招标公告清单（共{len(rows)}条）", sec))
 
         tbl_data = [[
-            Paragraph("网站名称", h),
             Paragraph("项目名称", h),
+            Paragraph("发布日期", h),
             Paragraph("发包人", h),
             Paragraph("项目金额\n（万元）", h),
             Paragraph("开标时间", h),
@@ -252,10 +268,11 @@ def detail_pages(f: str, records: List[dict]) -> list:
                 Paragraph(f"<link href='{url}' color='blue'><u>详情</u></link>", lnk)
                 if url else Paragraph("—", cc)
             )
+            pub_dt  = (r["publish_date"] or "")[:10] or "—"
             open_dt = (r["open_date"] or "")[:10] or "—"
             tbl_data.append([
-                Paragraph(site, cn),
                 Paragraph(name, cn),
+                Paragraph(pub_dt, cc),
                 Paragraph((r["purchaser"] or "—").strip(), cn),
                 Paragraph(_fmt_amount(r["budget"]), cc),
                 Paragraph(open_dt, cc),
@@ -264,7 +281,7 @@ def detail_pages(f: str, records: List[dict]) -> list:
 
         tbl = Table(
             tbl_data,
-            colWidths=[2.5*cm, 6.0*cm, 3.5*cm, 1.8*cm, 2.2*cm, 1.5*cm],
+            colWidths=[6.5*cm, 1.8*cm, 3.2*cm, 1.8*cm, 2.0*cm, 1.2*cm],
             repeatRows=1
         )
         tbl.setStyle(TableStyle([
@@ -296,12 +313,12 @@ def generate(year: int, month: int) -> str:
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     report_month = f"{year}年{month}月"
 
-    records = month_records(first, last)
-    if not records:
+    all_records = month_records(first, last)
+    if not all_records:
         print(f"[WARN] {report_month} 无盐南/经开数据")
         return ""
 
-    font = _register_font()
+    font  = _register_font()
     fname = OUTPUT_DIR / f"盐开招标公告_{year}{month:02d}.pdf"
 
     doc = SimpleDocTemplate(
@@ -309,15 +326,17 @@ def generate(year: int, month: int) -> str:
         leftMargin=1.5*cm, rightMargin=1.5*cm,
         topMargin=1.5*cm, bottomMargin=1.5*cm,
         title=f"盐开招标公告月报 {report_month}",
-        author="盐城招标信息采集系统 Pro v1.4",
+        author="盐城招标信息采集系统 Pro v1.5",
     )
 
     story = []
-    story.extend(page1_summary(font, report_month, first, last, today, yesterday, records))
-    story.extend(detail_pages(font, records))
+    story.extend(page1_summary(font, report_month, first, last, today, yesterday, all_records))
+    story.extend(detail_pages(font, all_records))
 
     doc.build(story)
-    print(f"✅ {fname}（{len(records)}条）")
+    unclassified = sum(1 for r in all_records if r["proj_major_cat"] is None)
+    classified   = sum(1 for r in all_records if r["proj_major_cat"] is not None)
+    print(f"✅ {fname}（总{len(all_records)}条：已分类{classified} / 未分类{unclassified}）")
     return str(fname)
 
 
