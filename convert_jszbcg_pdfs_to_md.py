@@ -39,7 +39,7 @@ def _ocr_pdf(pdf_path: Path) -> tuple[str, str]:
     try:
         import fitz, tempfile, os
         from paddleocr import PaddleOCR
-        ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+        ocr = PaddleOCR(use_angle_cls=True, lang="ch")
         doc = fitz.open(str(pdf_path))
         lines = []
         for page in doc:
@@ -47,11 +47,19 @@ def _ocr_pdf(pdf_path: Path) -> tuple[str, str]:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
                 tmp = f.name
             pix.save(tmp)
-            result = ocr.ocr(tmp, cls=True)
+            result = ocr.ocr(tmp)
             os.unlink(tmp)
-            if result and result[0]:
-                for line in result[0]:
-                    lines.append(line[1][0])
+            if result:
+                for item in result:
+                    # PaddleOCR v3: OCRResult with rec_texts list
+                    texts = item.get("rec_texts") if hasattr(item, "get") else None
+                    if texts:
+                        lines.extend(texts)
+                    elif isinstance(item, list):
+                        # v2 fallback: [[bbox, [text, score]], ...]
+                        for line in item:
+                            if line and len(line) > 1:
+                                lines.append(line[1][0])
         doc.close()
         return "\n".join(lines), "ocr"
     except Exception as e:
