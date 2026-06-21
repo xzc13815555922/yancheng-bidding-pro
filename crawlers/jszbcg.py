@@ -28,6 +28,7 @@ API_BASE   = "https://api.jszbtb.com/DataGatewayApi/PublishBulletins"
 DETAIL_API = "https://api.jszbtb.com/DataGatewayApi/BulletinDetail/{bid_id}"
 SITE_URL   = "https://www.jszbcg.com"
 PDF_DIR    = Path(__file__).parent.parent / "data" / "pdfs" / "jszbcg"
+MD_DIR     = Path(__file__).parent.parent / "data" / "pages" / "jszbcg"
 
 # bulletinType → notice_type 映射
 BULLETIN_TYPE_MAP = {
@@ -92,9 +93,10 @@ class JSZbcgCrawlerPro(BaseCrawler):
                         if bid_id:
                             pdf_path = self._download_pdf(bid_id)
                             if pdf_path:
+                                md_path = self._pdf_to_md(record["id"], record["project_name"], pdf_path)
                                 self.db._get_conn().execute(
-                                    "UPDATE notices SET pdf_path=? WHERE id=?",
-                                    (pdf_path, record["id"])
+                                    "UPDATE notices SET pdf_path=?, page_path=? WHERE id=?",
+                                    (pdf_path, md_path or None, record["id"])
                                 )
                                 self.db._get_conn().commit()
                     total += 1
@@ -159,6 +161,67 @@ class JSZbcgCrawlerPro(BaseCrawler):
             return str(pdf_file)
         except Exception:
             return ""
+
+    def _pdf_to_md(self, record_id: str, project_name: str, pdf_path: str) -> str:
+        """将 PDF 转成 MD 文件，按项目名命名存入 MD_DIR。返回 MD 路径，失败返回空字符串。"""
+        import re as _re
+        MD_DIR.mkdir(parents=True, exist_ok=True)
+
+        def _safe(title: str) -> str:
+            name = _re.sub(r'[\\/*?:"<>|\r\n\t]', '', title or "untitled")
+            name = _re.sub(r'\s+', '_', name.strip())
+            return name[:60] or "untitled"
+
+        base = _safe(project_name)
+        md_path = MD_DIR / f"{base}.md"
+        if md_path.exists():
+            suffix = abs(hash(record_id)) % 9999 + 1
+            md_path = MD_DIR / f"{base}_{suffix:04d}.md"
+
+        text = ""
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            text = "\n".join(page.get_text("text") for page in doc)
+            doc.close()
+        except Exception:
+            pass
+
+        if len(text.strip()) < 100:
+            # 图片型 PDF → PaddleOCR
+            try:
+                import fitz, tempfile, os as _os
+                from paddleocr import PaddleOCR
+                ocr = PaddleOCR(use_angle_cls=True, lang="ch")
+                doc = fitz.open(pdf_path)
+                lines = []
+                for page in doc:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                        tmp = f.name
+                    pix.save(tmp)
+                    result = ocr.ocr(tmp)
+                    _os.unlink(tmp)
+                    if result:
+                        for item in result:
+                            texts = item.get("rec_texts") if hasattr(item, "get") else None
+                            if texts:
+                                lines.extend(texts)
+                            elif isinstance(item, list):
+                                for line in item:
+                                    if line and len(line) > 1:
+                                        lines.append(line[1][0])
+                doc.close()
+                text = "\n".join(lines)
+            except Exception as e:
+                logger.warning(f"  OCR失败 {project_name}: {e}")
+                return ""
+
+        if len(text.strip()) < 30:
+            return ""
+
+        md_path.write_text(f"# {project_name}\n\n{text}", encoding="utf-8")
+        return str(md_path)
 
     def _map_record(self, raw: Dict, notice_type: str, type_label: str) -> Optional[Dict]:
         """将 API 原始 23 列映射到标准 schema + 保留 raw_json。"""

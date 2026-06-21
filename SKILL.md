@@ -5,7 +5,7 @@ outputs:
   - sqlite  # data/unified.db（三张表：tender/award/intention）
   - sqlite  # data/*.db（12个站点独立数据库）
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
-version: v1.3
+version: v1.4
 status: 生产可用
 last_run: 2026-06-21
 records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单位=1230
@@ -19,11 +19,11 @@ records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单
 
 **覆盖站点**：jszbcg（江苏招标采购服务平台）、yancheng_gov、ycggzy、sufu、yueda、dushi、jscn、chennan、dongfang、bigdata、jingkai、kaifaqu
 
-## 本地缓存架构（v1.3）
+## 本地缓存架构（v1.4）
 
 所有富化操作均基于本地文件，无需重复联网：
 
-- **jszbcg**：爬虫阶段下载 PDF → `data/pdfs/jszbcg/{bulletinID}.pdf`，OCR 直接读本地
+- **jszbcg**：爬虫阶段下载 PDF → 立即转 MD → `data/pages/jszbcg/{项目名}.md`；`enrich_details.py` 直接读 MD
 - **其他 HTML 站**：爬虫阶段保存详情页 → `data/pages/{site}/{项目名}.md`，富化直接读本地
 - **sufu**：纯 API（`announcementResultListNew`），无需页面
 - **ycggzy**：SPA，数据已在列表 API 的 raw_json 中，无需详情页
@@ -34,23 +34,23 @@ records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单
 ```bash
 cd ~/.openclaw/workspace/yancheng-bidding-pro
 
-# 第一步：增量采集新记录（近3天，同步下载 HTML 页面 / PDF）
+# 第一步：增量采集（近3天，jszbcg 同步 PDF→MD，其他站同步下载 HTML→MD）
 python3 run_collection.py --days 3
 
-# 第二步：HTML 详情页补全（优先读本地 page_path，无则联网并缓存）
+# 第二步：详情页补全（读本地 page_path MD 文件，无则联网并缓存）
 python3 enrich_details.py
 
-# 第三步：jszbcg PDF OCR（优先读本地 pdf_path，首次约 20 分钟，后续增量 3-5 分钟）
-python3 enrich_jszbcg_ocr.py
-
-# 第四步：区县标准化（std_district）
+# 第三步：区县标准化（std_district）
 python3 add_std_district.py
 
-# 第五步：类别打标（std_category）
+# 第四步：类别打标（std_category）
 python3 add_std_category.py
 
-# 第六步：生成 unified.db（三张表）
+# 第五步：生成 unified.db（三张表）
 python3 build_unified.py
+
+# 第六步：数据质量验证
+python3 verify_quality.py
 
 # 可选：导出 Excel
 python3 export_excel.py
@@ -167,6 +167,13 @@ python3 enrich_yancheng_gov.py
 - **yancheng_gov 10组重复记录**：同名同日期不同 art_id，疑似多标包；is_duplicate 未标记
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
 - **std_category 覆盖率仅 33%**：分类规则定义不足
+
+## 本轮修复清单（v1.3 → v1.4，2026-06-21）
+
+| # | 问题 | 修复位置 |
+|---|------|---------|
+| 26 | jszbcg 富化依赖单独 OCR 步骤（enrich_jszbcg_ocr.py）| `crawlers/jszbcg.py` 新记录下载 PDF 后立即调 `_pdf_to_md()`，设置 `page_path`；`enrich_details.py` 统一读 MD |
+| 27 | run_daily.sh 7步改6步（去掉 enrich_jszbcg_ocr.py 步骤） | `run_daily.sh` |
 
 ## 本轮修复清单（v1.2 → v1.3，2026-06-21）
 

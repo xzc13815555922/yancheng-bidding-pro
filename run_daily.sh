@@ -11,25 +11,22 @@ log() { echo "[$(date '+%H:%M:%S')] $1" | tee -a "$LOG"; }
 cd "$WORKSPACE"
 log "=== 每日采集任务开始 $(date '+%Y-%m-%d') ==="
 
-log "1/7 增量采集..."
+log "1/6 增量采集（含PDF→MD转换）..."
 python3 run_collection.py --days 3 >> "$LOG" 2>&1
 
-log "2/7 补全详情..."
+log "2/6 补全详情..."
 python3 enrich_details.py >> "$LOG" 2>&1
 
-log "3/7 OCR识别..."
-python3 enrich_jszbcg_ocr.py >> "$LOG" 2>&1
-
-log "4/7 标准区县分类..."
+log "3/6 标准区县分类..."
 python3 add_std_district.py >> "$LOG" 2>&1
 
-log "5/7 标准项目分类..."
+log "4/6 标准项目分类..."
 python3 add_std_category.py >> "$LOG" 2>&1
 
-log "6/7 构建统一数据库..."
+log "5/6 构建统一数据库..."
 python3 build_unified.py >> "$LOG" 2>&1
 
-log "7/7 数据质量验证..."
+log "6/6 数据质量验证..."
 python3 verify_quality.py >> "$LOG" 2>&1 || {
     log "⚠️  质量验证未通过，详见日志 $LOG"
     # 不以非零退出，避免阻断通知发送
