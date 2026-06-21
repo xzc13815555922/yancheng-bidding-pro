@@ -329,3 +329,7 @@ if __name__ == "__main__":
     p.add_argument("--force", action="store_true", help="强制重跑已有 winner 的记录")
     args = p.parse_args()
     enrich_jszbcg_ocr(limit=args.limit, force=args.force)
+    import subprocess, sys as _sys
+    from pathlib import Path as _Path
+    print("\n[同步] 重建 unified.db ...")
+    subprocess.run([_sys.executable, str(_Path(__file__).parent / "build_unified.py")], check=False)

@@ -242,3 +242,8 @@ for site in SITES:
     conn.close()
 
 print("\n✅ Done")
+
+import subprocess, sys as _sys
+from pathlib import Path as _Path
+print("[同步] 重建 unified.db ...")
+subprocess.run([_sys.executable, str(_Path(__file__).parent / "build_unified.py")], check=False)

@@ -320,3 +320,8 @@ for site in SITES:
     conn.close()
 
 print(f"\n已分类: {filled_all}/{total_all} ({filled_all*100//total_all}%)")
+
+import subprocess, sys as _sys
+from pathlib import Path as _Path
+print("[同步] 重建 unified.db ...")
+subprocess.run([_sys.executable, str(_Path(__file__).parent / "build_unified.py")], check=False)

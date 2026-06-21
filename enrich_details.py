@@ -544,3 +544,9 @@ if __name__ == "__main__":
     else:
         enrich_all(dry_run=args.dry_run)
         print_stats()
+
+    if not args.stats and not args.dry_run:
+        import subprocess, sys as _sys
+        from pathlib import Path as _Path
+        print("\n[同步] 重建 unified.db ...")
+        subprocess.run([_sys.executable, str(_Path(__file__).parent / "build_unified.py")], check=False)
