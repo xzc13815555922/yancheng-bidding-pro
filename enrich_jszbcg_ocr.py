@@ -158,15 +158,16 @@ def _parse_ocr_text(text: str, notice_type: str) -> dict:
     # ── 预算 / 控制价（tender 和 award 均尝试）──
     budget_patterns = [
         r"最高限价[（(]不含税[)）]?[：:]([\d.]+)\s*万元",
-        r"最高限价[：:]([\d.]+)\s*万元",
-        r"控制价[：:]([\d.]+)\s*万元",
-        r"预算金额[：:]([\d.]+)\s*万元",
-        r"采购预算[：:]([\d.]+)\s*万元",
-        r"采购限价[：:]([\d.]+)\s*万元",
-        r"项目预算[：:]([\d.]+)\s*万元",
-        r"最高限价[：:]([\d.]+)\s*元",
-        r"控制价[：:]([\d.]+)\s*元",
-        r"采购限价[：:]([\d.]+)\s*元",
+        r"最高限价[：:\s约]{0,3}([\d.]+)\s*万元",
+        r"控制价[：:\s约]{0,3}([\d.]+)\s*万元",
+        r"预算金额[：:\s约]{0,3}([\d.]+)\s*万元",
+        r"采购预算[：:\s约]{0,3}([\d.]+)\s*万元",
+        r"采购限价[：:\s约]{0,3}([\d.]+)\s*万元",
+        r"项目预算[：:\s约]{0,3}([\d.]+)\s*万元",
+        r"资金[：:]\s*[\d.]+\s*万元[，,][^，。]{0,20}([\d.]+)\s*万元",
+        r"最高限价[：:\s约]{0,3}([\d.]+)\s*元",
+        r"控制价[：:\s约]{0,3}([\d.]+)\s*元",
+        r"采购限价[：:\s约]{0,3}([\d.]+)\s*元",
         r"国有资金[：:]([\d.]+)万元",
     ]
     for pat in budget_patterns:
@@ -287,8 +288,17 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
             skip += 1
             continue
 
-        # ── 4. 解析 ──
+        # ── 4. 解析（OCR正则 + parse_html_detail 双引擎，互补缺失字段）──
         fields = _parse_ocr_text(text, ntype)
+        # 用 parse_html_detail 补充 _parse_ocr_text 未提取到的字段
+        try:
+            from enrich_details import parse_html_detail as _phd
+            generic = _phd(text, ntype)
+            for key in ("budget", "budget_unit", "budget_text", "winner", "winning_amount", "open_date", "purchaser"):
+                if key not in fields and generic.get(key):
+                    fields[key] = generic[key]
+        except Exception:
+            pass
         if ntype == "award" and "winner" not in fields:
             fields["winner"] = ""
         if not fields:
