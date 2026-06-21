@@ -96,6 +96,24 @@ _ORG_SUFFIX = (
 )
 _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 
+# 发包单位黑名单：提取结果含这些词则判为误匹配
+_BAD_PURCHASER_RE = re.compile(
+    r'满足《|中华人民共和国|政府采购法|申请人|不得参加|资格要求|期间通过|依据《|根据《'
+    r'|报名期间|同一合同|参加政府|具备以下|本次采购依据'
+)
+
+
+def _is_valid_purchaser(name: str) -> bool:
+    """简单校验提取结果是否像真实机构名，过滤法条/资格要求误匹配。"""
+    if not name or len(name) < 4:
+        return False
+    # 以编号/括号/数字开头 → 来自列表条款而非机构名
+    if re.match(r'^[(（\d一二三四五六七八九十]', name):
+        return False
+    if _BAD_PURCHASER_RE.search(name):
+        return False
+    return True
+
 
 def _extract_after_keyword(text: str, keywords: list, window: int = 100) -> Optional[str]:
     """在 text 中找 keyword，要求后5字内有冒号（避免误匹配句子中的关键字），
@@ -200,7 +218,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         m = re.match(rf'.{{2,35}}?(?:{_ORG_SUFFIX})', chunk)
         if m:
             val = m.group(0).strip()
-            if 4 < len(val) < 45:
+            if 4 < len(val) < 45 and _is_valid_purchaser(val):
                 result["purchaser"] = val
 
     # 敘事句兜底：无标签页面的几种常见格式
@@ -226,12 +244,16 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         if m:
             val = m.group(1).strip()
             # 过滤误匹配：政府采购平台名、通用语句片段
-            if not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位")):
+            if (_is_valid_purchaser(val) and
+                    not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位"))):
                 result["purchaser"] = val
 
     # 清除 "关于" 前缀（如"关于凤依府项目..."被误提取）
     if result.get("purchaser", "").startswith("关于"):
         result["purchaser"] = result["purchaser"][2:].lstrip()
+    # 最终校验：如果最终值仍不像机构名则清空
+    if not _is_valid_purchaser(result.get("purchaser", "")):
+        result.pop("purchaser", None)
 
     # 预算金额（过滤保证金等）
     t_nospace = re.sub(r'\s+', '', text)
@@ -263,11 +285,39 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             dt = _parse_datetime(chunk)
             if dt:
                 result["open_date"] = dt
+        # fallback: 标题型 "开标时间和地点\n2026-07-09 08:30"（yancheng_gov 常见）
+        if not result.get("open_date"):
+            m = re.search(r'开标时间[^：:\d\n]{0,15}\n+(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[^\n]{0,20})', text)
+            if m:
+                dt = _parse_datetime(m.group(1))
+                if dt:
+                    result["open_date"] = dt
+        # fallback: 无冒号直接跟日期（去空格后 "开标时间和地点**2026-07-09"）
+        if not result.get("open_date"):
+            t_ns = re.sub(r'\s+', '', text)
+            m = re.search(r'开标时间[^：:]{0,20}(\d{4}[-]\d{2}[-]\d{2}.{0,8}\d{2}:\d{2})', t_ns)
+            if m:
+                dt = _parse_datetime(m.group(1))
+                if dt:
+                    result["open_date"] = dt
         chunk = _extract_after_keyword(text, DEADLINE_KEYWORDS, 40)
         if chunk:
             dt = _parse_datetime(chunk)
             if dt:
                 result["deadline"] = dt
+        # fallback: "于YYYY年M月D日HH:MM前" / "于YYYY-MM-DD HH:MM前" 句式（询价/磋商常见）
+        if not result.get("deadline"):
+            m = re.search(
+                r'于(\d{4}[年\-]\d{1,2}[月\-]\d{1,2}日?\s*\d{1,2}[时:：]\d{2})[^前]{0,5}前',
+                text
+            )
+            if m:
+                dt = _parse_datetime(m.group(1))
+                if dt:
+                    result["deadline"] = dt
+        # 若 open_date 仍空，用 deadline 代替（适用于"截止即开标"的政府采购公告）
+        if not result.get("open_date") and result.get("deadline"):
+            result["open_date"] = result["deadline"]
 
     if notice_type == "intention":
         chunk = _extract_after_keyword(text, EXPECTED_KEYWORDS, 40)

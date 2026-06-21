@@ -22,7 +22,7 @@ SITE_BASELINES = {
     },
     "yancheng_gov": {
         "count":     850,
-        "purchaser": 0.88,
+        "purchaser": 0.94,
     },
     "ycggzy": {
         "count":     1280,
