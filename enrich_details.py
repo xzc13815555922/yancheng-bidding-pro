@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 PURCHASER_KEYWORDS = [
     "采购人", "采购单位", "发包单位", "发包方", "发包人", "业主单位",
     "建设单位", "项目单位", "招标人", "招标单位", "委托单位",
+    "询价人", "委托方",
     "单位名称",
 ]
 BUDGET_KEYWORDS = [
@@ -66,7 +67,8 @@ OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期"]
 DEADLINE_KEYWORDS   = ["报名截止", "投标截止", "截标时间", "递交截止", "报名截止时间"]
 EXPECTED_KEYWORDS   = ["预计挂网时间", "预计发布时间", "预计挂网日期", "预计公告时间"]
 WINNER_KEYWORDS     = ["中标单位", "中标供应商", "成交供应商", "中标人",
-                       "中标候选人第一名", "中标候选人", "中标侯选人"]
+                       "中标候选人第一名", "中标候选人", "中标侯选人",
+                       "中选人", "中选供应商", "成交人"]
 WIN_AMOUNT_KEYWORDS = ["中标金额", "成交金额", "中标价格", "成交价格", "中标价"]
 
 HEADERS = {
@@ -107,6 +109,7 @@ _ORG_SUFFIX = (
     r'公司|集团|局|委员会|管委会|政府|中心|学校|医院|协会|基金|银行|事务所|研究院|研究所|大学|学院'
     r'|办事处|街道办|街道|管理处|管理委员会|部门|办公室'
     r'|宣传部|财政局|教育局|卫生局|民政局|住建局|自然资源局'
+    r'|队|所|站|院|厂|场|社|部'
 )
 _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 
@@ -114,6 +117,7 @@ _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 _BAD_PURCHASER_RE = re.compile(
     r'满足《|中华人民共和国|政府采购法|申请人|不得参加|资格要求|期间通过|依据《|根据《'
     r'|报名期间|同一合同|参加政府|具备以下|本次采购依据'
+    r'|项目名称[：:]|名称[：:][^一-龥]'
 )
 
 
@@ -429,6 +433,23 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                         break
             except Exception:
                 pass
+        if not winner_val:
+            # Markdown 管道表格（_clean 后换行变空格）
+            # 格式: 供应商名称 | ... | 中标/成交金额 ---|---...|--- 1 | 江苏XXX | ... | 2695000元
+            m_md = re.search(
+                r'---\s+(\d+)\s*\|\s*([^|]{4,50})\s*\|',
+                text
+            )
+            if m_md:
+                v = m_md.group(2).strip()
+                if _ORG_PATTERN.search(v) and 4 < len(v) < 50 and _is_valid_purchaser(v):
+                    winner_val = v
+                    tail = text[m_md.end():]
+                    m_amt = re.search(r'([\d,.]+)\s*(万元|亿元|元)', tail[:200])
+                    if m_amt:
+                        amt, _ = _parse_amount(m_amt.group(0))
+                        if amt and 100 <= amt <= 5e10:
+                            result['winning_amount'] = amt
         if winner_val:
             result["winner"] = winner_val
         if "winning_amount" not in result:

@@ -1,11 +1,12 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/3920条原始→unified.db 3055条）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + Excel
+description: 全域盐城招标数据采集（12站/3920条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + Excel
 outputs:
   - sqlite  # data/unified.db（三张表：tender/award/intention）
   - sqlite  # data/*.db（12个站点独立数据库）
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
-version: v1.4
+  - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
+version: v1.5
 status: 生产可用
 last_run: 2026-06-21
 records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单位=1230
@@ -114,7 +115,7 @@ python3 enrich_yancheng_gov.py
 | open_date  | 1133   | 29%  |
 | winner     | 1230   | 31%  |
 | std_district | ~98% | add_std_district.py |
-| std_category | 33%  | 规则持续扩充 |
+| std_category | 45%  | 规则持续扩充 |
 
 ### 各站概况
 
@@ -166,7 +167,16 @@ python3 enrich_yancheng_gov.py
 
 - **yancheng_gov 10组重复记录**：同名同日期不同 art_id，疑似多标包；is_duplicate 未标记
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
-- **std_category 覆盖率仅 33%**：分类规则定义不足
+- **std_category 覆盖率 45%**：规则持续扩充中
+
+## 本轮修复清单（v1.4 → v1.5，2026-06-21）
+
+| # | 问题 | 修复位置 |
+|---|------|---------|
+| 28 | tender 表混入最高限价公示（price_cap）| `build_unified.py` 去掉 price_cap，只保留 tender/requirement |
+| 29 | std_category 覆盖率 43%→45%，新增30+关键词 | `add_std_category.py`：餐饮外包/食堂运营/漂浮物/危废处理/外墙整治/劳保用品/财务审计/资产评估/尽职调查/债务融资/主承销商/宣传品制作/媒体合作/主题活动/龙舟赛/苏超/毕业典礼等 |
+| 30 | 全资产处置3条规则缺 IT 词保护（must_not 不全）| `add_std_category.py` 土地处置/房屋招租/资产处置补全信息化/数字化/智能化/人工智能排除词 |
+| 31 | 新增盐开招标公告月报生成脚本 | `generate_tender_report.py`：按盐南+经开+未分类筛选，输出 PDF |
 
 ## 本轮修复清单（v1.3 → v1.4，2026-06-21）
 
