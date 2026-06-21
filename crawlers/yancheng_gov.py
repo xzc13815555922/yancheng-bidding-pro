@@ -175,10 +175,12 @@ class YanchengGovCrawlerPro(BaseCrawler):
                     if a_m:
                         t = re.sub(r'<[^>]+>', '', a_m.group(1)).strip()
                         t = t.replace("&nbsp;", "").replace("&amp;", "&").strip()
-                        if t and len(t) >= 3:
+                        # 剔除因 <!--标题--> 导致的属性字串误匹配
+                        if t and len(t) >= 3 and "href=" not in t and "target=" not in t and "<!--" not in t:
                             title = t
 
-                if col_id in NEED_DETAIL_TITLE and (not title or len(title) < 5):
+                # 任何情况下标题为空/疑似无效 → 从详情页补取
+                if not title or "href=" in title or "<!--" in title:
                     title = self._fetch_detail_title(detail_url)
 
                 if not title or len(title) < 3:
@@ -219,9 +221,15 @@ class YanchengGovCrawlerPro(BaseCrawler):
         try:
             resp = self.session.get(url, timeout=10)
             if resp.status_code == 200:
+                resp.encoding = resp.apparent_encoding or "utf-8"
                 m = re.search(r'<title>(.*?)</title>', resp.text, re.S)
                 if m:
-                    return m.group(1).strip()
+                    t = m.group(1).strip()
+                    # czj.yancheng.gov.cn 页面title格式: "站点名 公告类型 项目名称"
+                    parts = t.split(' ', 2)
+                    if len(parts) == 3 and parts[0] in ('盐城市财政局',):
+                        t = parts[2]
+                    return t
         except Exception:
             pass
         return ""

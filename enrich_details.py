@@ -38,11 +38,12 @@ logger = logging.getLogger(__name__)
 # 解析关键字
 # ─────────────────────────────────────────────
 PURCHASER_KEYWORDS = [
-    "采购人", "采购单位", "发包单位", "发包方", "业主单位",
+    "采购人", "采购单位", "发包单位", "发包方", "发包人", "业主单位",
     "建设单位", "项目单位", "招标人", "招标单位", "委托单位",
+    "单位名称",
 ]
 BUDGET_KEYWORDS = [
-    "项目预算", "采购预算", "控制价", "最高限价",
+    "项目预算", "采购预算", "控制价", "最高限价", "限价",
     "总投资", "投资额", "预算金额", "总预算",
     "项目规模", "服务费", "监理费", "工程造价", "项目造价",
     "合同估算价", "合同预估金额", "合同预计金额", "合同预计总金额",
@@ -76,16 +77,22 @@ def _strip_html(html: str) -> str:
     import html as html_lib
     text = html_lib.unescape(html)
     text = text.replace('\xa0', ' ').replace('　', ' ')  # non-breaking spaces
+    # 提取 meta description（部分站点正文藏在此处，如都市集团）
+    meta_desc = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', text, re.S | re.I)
+    if not meta_desc:
+        meta_desc = re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']description["\']', text, re.S | re.I)
+    meta_text = (" " + meta_desc.group(1)) if meta_desc else ""
     text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.S | re.I)
     text = re.sub(r'<style[^>]*>.*?</style>', ' ', text, flags=re.S | re.I)
     text = re.sub(r'<[^>]+>', ' ', text)
+    text = text + meta_text  # 追加 meta description 到末尾供关键词匹配
     text = re.sub(r'&[a-zA-Z#0-9]+;', ' ', text)
     return text
 
 
 # 发包单位结尾词（仅保留歧义低的多字或强语义词，排除"部/所/院/委"等高歧义单字）
 _ORG_SUFFIX = (
-    r'公司|集团|局|委员会|中心|学校|医院|协会|基金|银行|事务所|研究院|研究所|大学|学院'
+    r'公司|集团|局|委员会|管委会|政府|中心|学校|医院|协会|基金|银行|事务所|研究院|研究所|大学|学院'
 )
 _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 
@@ -195,6 +202,36 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             val = m.group(0).strip()
             if 4 < len(val) < 45:
                 result["purchaser"] = val
+
+    # 敘事句兜底：无标签页面的几种常见格式
+    if "purchaser" not in result:
+        # 格式1: 「因经营需要，XX公司需对/拟对...」
+        m = re.search(
+            rf'(?:因[经业]营需要[，,]|因工作需要[，,]|为[满完]足[^，。]{{0,10}}[，,])'
+            rf'([^，。\s]{{4,35}}(?:{_ORG_SUFFIX}))[^，。]{{0,8}}(?:需|拟|将|决|计划)',
+            text
+        )
+        # 格式2: 「XX公司负责实施/决定/现对...」
+        if not m:
+            m = re.search(
+                rf'([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*(?:负责实施|决定对|现对|现需|计划对)',
+                text
+            )
+        # 格式3: meta description 以公司名开头，紧接项目名（无分隔符）
+        if not m:
+            m = re.search(rf'(?:^|[ 。\n，])([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))(?:[^，。\s]{{0,15}}(?:项目|工程|服务|采购|询价))', text)
+        # 格式4: "XXX公司在...进行采购/通过...方式" — dongfang 首句主语格式
+        if not m:
+            m = re.search(rf'([^，。\n\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*在[^，。]{{0,20}}(?:项目|工程|服务|采购|询价|通过)', text)
+        if m:
+            val = m.group(1).strip()
+            # 过滤误匹配：政府采购平台名、通用语句片段
+            if not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位")):
+                result["purchaser"] = val
+
+    # 清除 "关于" 前缀（如"关于凤依府项目..."被误提取）
+    if result.get("purchaser", "").startswith("关于"):
+        result["purchaser"] = result["purchaser"][2:].lstrip()
 
     # 预算金额（过滤保证金等）
     t_nospace = re.sub(r'\s+', '', text)
@@ -386,7 +423,7 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
     db = SiteDB(site_key)
     conn = db._get_conn()
 
-    q = "SELECT id, detail_url, notice_type, raw_json, budget, budget_unit, deadline, purchaser_raw FROM notices WHERE detail_fetched=0"
+    q = "SELECT id, detail_url, notice_type, raw_json, budget, budget_unit, deadline, purchaser_raw FROM notices WHERE detail_fetched IS NULL OR detail_fetched=0"
     if limit:
         q += f" LIMIT {limit}"
     rows = conn.execute(q).fetchall()
@@ -462,22 +499,17 @@ def enrich_all(dry_run: bool = False):
     for site_key in ["jszbcg", "sufu"]:
         enrich_site(site_key, dry_run=dry_run)
 
-    # HTML 类站
+    # HTML 类站（含 yancheng_gov，requests 可正常访问）
     html_sites = [
         "yueda", "chennan", "dongfang", "jscn",
         "dushi", "bigdata", "jingkai", "kaifaqu", "ycggzy",
+        "yancheng_gov",
     ]
     for site_key in html_sites:
         db_path = DATA_DIR / f"{site_key}.db"
         if not db_path.exists():
             continue
         enrich_site(site_key, dry_run=dry_run)
-
-    # yancheng_gov：requests 会 403，直接标记为 2（Playwright 阶段处理）
-    logger.info("[yancheng_gov] 详情页需要 Playwright，跳过，标记 detail_fetched=2")
-    db = SiteDB("yancheng_gov")
-    db._get_conn().execute("UPDATE notices SET detail_fetched=2 WHERE detail_fetched=0")
-    db._get_conn().commit()
 
 
 def print_stats():

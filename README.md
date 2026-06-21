@@ -6,7 +6,7 @@
 
 | 站点 | 说明 |
 |------|------|
-| jszbcg | 江苏政府采购网（盐城） |
+| jszbcg | 江苏招标采购服务平台（盐城） |
 | jingkai | 盐城经开区 |
 | kaifaqu | 盐城开发区 |
 | ycggzy | 盐城公共资源交易 |
@@ -24,7 +24,7 @@
 ```
 crawlers/          各站点爬虫
   base.py          基类
-  jszbcg.py        江苏政府采购网
+  jszbcg.py        江苏招标采购服务平台
   ...
 add_std_category.py   标准分类打标（proj_major_cat / proj_minor_cat）
 add_std_district.py   行政区划打标

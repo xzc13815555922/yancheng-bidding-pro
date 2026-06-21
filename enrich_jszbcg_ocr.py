@@ -197,10 +197,12 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
     conn.row_factory = sqlite3.Row
 
     # Award records: only if winner is missing (award notices never contain budget)
-    # Tender/other records: only if budget is missing
+    # Tender records: budget OR purchaser missing (avoids re-skipping records enriched before purchaser extraction was added)
+    # Other records: only if budget is missing
     where = "" if force else """WHERE (
         (notice_type='award' AND winner IS NULL)
-        OR (notice_type!='award' AND budget IS NULL)
+        OR (notice_type='tender' AND (budget IS NULL OR purchaser IS NULL))
+        OR (notice_type NOT IN ('award','tender') AND budget IS NULL)
     )"""
     limit_clause = f" LIMIT {limit}" if limit else ""
     # award records first (winner extraction), then tender (budget), then other

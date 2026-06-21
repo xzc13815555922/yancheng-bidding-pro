@@ -77,6 +77,66 @@ def print_stats():
     print(f"{'合计':<14} {total_all:>6} {pc_all:>8} {bu_all:>6} {od_all:>8} {wi_all:>8}")
 
 
+def _repair_derived_fields(site_filter: str = ""):
+    """采集后从 raw_json 回填可推导但可能因历史缺失的字段。"""
+    import json as _json
+
+    # ycggzy: section ← raw_json.classCode
+    if not site_filter or site_filter == "ycggzy":
+        CODE_MAP = {
+            "transactionInfo-1": "工程建设",
+            "transactionInfo-2": "交通工程",
+            "transactionInfo-3": "水利工程",
+            "transactionInfo-4": "政府采购",
+            "transactionInfo-5": "货物与服务",
+            "transactionInfo-6": "土矿交易",
+            "transactionInfo-7": "国有产权",
+            "transactionInfo-9": "农业农村",
+        }
+        db_path = DATA_DIR / "ycggzy.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            rows = conn.execute(
+                "SELECT id, raw_json FROM notices WHERE section IS NULL OR section=''"
+            ).fetchall()
+            updates = []
+            for row_id, rj in rows:
+                try:
+                    code = _json.loads(rj).get("classCode", "")
+                    sec = CODE_MAP.get(code)
+                    if sec:
+                        updates.append((sec, row_id))
+                except Exception:
+                    pass
+            if updates:
+                conn.executemany("UPDATE notices SET section=? WHERE id=?", updates)
+                conn.commit()
+                logger.info(f"[ycggzy] section 回填 {len(updates)} 条")
+
+            # notice_type_raw ← raw_json.typeName
+            try:
+                conn.execute("ALTER TABLE notices ADD COLUMN notice_type_raw TEXT")
+                conn.commit()
+            except Exception:
+                pass
+            rows2 = conn.execute(
+                "SELECT id, raw_json FROM notices WHERE notice_type_raw IS NULL"
+            ).fetchall()
+            updates2 = []
+            for row_id, rj in rows2:
+                try:
+                    v = _json.loads(rj).get("typeName")
+                    if v:
+                        updates2.append((v, row_id))
+                except Exception:
+                    pass
+            if updates2:
+                conn.executemany("UPDATE notices SET notice_type_raw=? WHERE id=?", updates2)
+                conn.commit()
+                logger.info(f"[ycggzy] notice_type_raw 回填 {len(updates2)} 条")
+            conn.close()
+
+
 def run(start_date: str, end_date: str, site_filter: str = ""):
     results = {}
     for site_key, module_path, class_name in CRAWLERS:
@@ -95,6 +155,9 @@ def run(start_date: str, end_date: str, site_filter: str = ""):
         except Exception as e:
             logger.error(f"[{site_key}] 采集失败: {e}", exc_info=True)
             results[site_key] = {"error": str(e)}
+
+    # 采集后修复：从 raw_json 回填可推导的字段
+    _repair_derived_fields(site_filter)
 
     # 汇总
     logger.info("\n" + "="*50)

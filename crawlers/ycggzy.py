@@ -46,8 +46,8 @@ CLASS_CODES = [
     ("transactionInfo-3", "水利工程"),
     ("transactionInfo-4", "政府采购"),
     ("transactionInfo-5", "货物与服务"),
+    ("transactionInfo-7", "国有产权"),
     # ("transactionInfo-6", "土矿交易"),   # 暂不采集
-    # ("transactionInfo-7", "国有产权"),   # 暂不采集
     # ("transactionInfo-9", "农业农村"),   # 暂不采集
 ]
 
@@ -419,6 +419,37 @@ def _parse_ycggzy_content(html: str, notice_type: str) -> dict:
             if _ORG_PAT.search(val) and '代理' not in val:
                 result['purchaser'] = val[:40]
                 break
+
+    # 多列中标信息表格：表头含 "供应商名称"（政府采购 成交公告格式）
+    # 格式：序号 | 供应商名称 | 社会信用代码 | 供应商地址 | 评审报价 | 中标/成交金额
+    if notice_type == 'award' and ('winner' not in result or 'winning_amount' not in result):
+        try:
+            from bs4 import BeautifulSoup as _BS
+            _clean = re.sub(r'<!\[CDATA\[|\]\]>', '', html)
+            _soup = _BS(_clean, 'html.parser')
+            for _tbl in _soup.find_all('table'):
+                _hrow = _tbl.find('tr')
+                if not _hrow:
+                    continue
+                _hdrs = [td.get_text(strip=True) for td in _hrow.find_all(['td', 'th'])]
+                if '供应商名称' not in _hdrs:
+                    continue
+                _widx = _hdrs.index('供应商名称')
+                _aidx = next((i for i, h in enumerate(_hdrs) if '成交金额' in h or '中标金额' in h), -1)
+                for _tr in _tbl.find_all('tr')[1:]:
+                    _cells = [td.get_text(strip=True) for td in _tr.find_all(['td', 'th'])]
+                    if len(_cells) > _widx and _cells[_widx] and len(_cells[_widx]) >= 2:
+                        if 'winner' not in result:
+                            result['winner'] = _cells[_widx][:50]
+                        if _aidx >= 0 and 'winning_amount' not in result and len(_cells) > _aidx:
+                            _amt = _to_yuan(_cells[_aidx])
+                            if _amt and 100 <= _amt <= 5e10:
+                                result['winning_amount'] = _amt
+                        break
+                if 'winner' in result:
+                    break
+        except Exception:
+            pass
 
     # 其余字段复用通用解析器（预算/开标时间/中标信息）
     generic = parse_html_detail(html, notice_type)

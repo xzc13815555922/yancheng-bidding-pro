@@ -106,7 +106,8 @@ class SiteDB:
                         winner=:winner, winning_amount=:winning_amount,
                         region=:region, district_code=:district_code,
                         detail_url=:detail_url, source_url=:source_url,
-                        raw_json=:raw_json, detail_fetched=:detail_fetched
+                        raw_json=:raw_json, detail_fetched=:detail_fetched,
+                        section=COALESCE(:section, section)
                     WHERE id=:id
                 """, record)
             else:
@@ -118,7 +119,8 @@ class SiteDB:
                         open_date=:open_date, deadline=:deadline, expected_list=:expected_list,
                         region=:region, district_code=:district_code,
                         detail_url=:detail_url, source_url=:source_url,
-                        raw_json=:raw_json
+                        raw_json=:raw_json,
+                        section=COALESCE(:section, section)
                     WHERE id=:id
                 """, record)
             conn.commit()
@@ -134,7 +136,7 @@ class SiteDB:
             placeholders = ", ".join(f":{c}" for c in cols)
             conn.execute(
                 f"INSERT INTO notices ({', '.join(cols)}) VALUES ({placeholders})",
-                {c: record.get(c) for c in cols},
+                {c: (record.get(c) if c != "detail_fetched" else record.get(c, 0)) for c in cols},
             )
             conn.commit()
             return True
