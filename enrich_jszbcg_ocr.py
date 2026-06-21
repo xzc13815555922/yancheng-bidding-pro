@@ -200,9 +200,9 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
     # Tender records: budget OR purchaser missing (avoids re-skipping records enriched before purchaser extraction was added)
     # Other records: only if budget is missing
     where = "" if force else """WHERE (
-        (notice_type='award' AND winner IS NULL)
+        (notice_type='award' AND (winner IS NULL OR purchaser IS NULL))
         OR (notice_type='tender' AND (budget IS NULL OR purchaser IS NULL))
-        OR (notice_type NOT IN ('award','tender') AND budget IS NULL)
+        OR (notice_type NOT IN ('award','tender') AND (budget IS NULL OR purchaser IS NULL))
     )"""
     limit_clause = f" LIMIT {limit}" if limit else ""
     # award records first (winner extraction), then tender (budget), then other
@@ -231,14 +231,24 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
             skip += 1
             continue
 
-        # ── 1. 获取 PDF URL ──
+        # ── 1. 获取 Detail API（取 PDF URL + tenderName 发包单位）──
         try:
             r = sess.get(DETAIL_API.format(bid_id=bid_id), timeout=10)
-            pdf_url = r.json().get("data", {}).get("signPdfUrl", "")
+            detail_data = r.json().get("data") or {}
+            pdf_url = detail_data.get("signPdfUrl", "")
+            tender_name = detail_data.get("tenderName") or ""
         except Exception as e:
             logger.info(f"  → Detail API 失败: {e}")
             fail += 1
             continue
+
+        # 从 tenderName 回填 purchaser（无论有无 PDF，覆盖所有类型）
+        if tender_name:
+            conn.execute(
+                "UPDATE notices SET purchaser=COALESCE(purchaser, ?) WHERE id=?",
+                (tender_name[:50], rid)
+            )
+            conn.commit()
 
         if not pdf_url:
             logger.info(f"  → 跳过: 无PDF链接")
