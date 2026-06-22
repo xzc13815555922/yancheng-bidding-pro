@@ -22,17 +22,17 @@ SITES = [
 # 网站名称映射
 SITE_NAMES = {
     "jszbcg":       "江苏招标采购服务平台",
-    "yancheng_gov": "盐城政府网",
-    "ycggzy":       "盐城公共资源交易",
+    "yancheng_gov": "盐城市政府采购网",
+    "ycggzy":       "盐城市公共资源交易平台",
     "sufu":         "苏服务",
-    "yueda":        "悦达",
-    "dushi":        "都市招标",
-    "jscn":         "江苏城南",
-    "chennan":      "盐南高新区",
-    "dongfang":     "东方招标",
-    "bigdata":      "大数据平台",
-    "jingkai":      "盐城经开区",
-    "kaifaqu":      "盐城开发区",
+    "yueda":        "悦达集团阳光采购平台",
+    "dushi":        "盐城市都市建设投资集团有限公司",
+    "jscn":         "江苏世纪新城投资控股集团有限公司",
+    "chennan":      "江苏省盐南高新区公共资源交易电子化服务平台",
+    "dongfang":     "盐东方产业投资集团有限公司",
+    "bigdata":      "盐城市大数据集团",
+    "jingkai":      "盐城经开城市发展投资集团有限公司",
+    "kaifaqu":      "盐城经济技术开发区行政审批局公共资源交易服务平台",
 }
 
 DDL_TENDER = """
@@ -104,10 +104,16 @@ def load_site(db_path: Path):
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM notices WHERE is_duplicate = 0").fetchall()
 
+    # yancheng_gov 专项：art_20171_* 是公开招标的精简跳转页，open_date 全空，过滤掉
+    _BAD_URL_PAT = _re.compile(r'art_20171_')
+
     for row in rows:
         r = dict(row)
         ntype = r.get("notice_type", "")
         site_name = SITE_NAMES.get(r.get("site", ""), r.get("site", ""))
+
+        if r.get("site") == "yancheng_gov" and _BAD_URL_PAT.search(r.get("detail_url") or ""):
+            continue
 
         if ntype in ("tender", "requirement"):
             tenders.append((

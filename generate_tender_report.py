@@ -28,33 +28,33 @@ OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 SITE_ORDER = [
-    "盐城政府网",
+    "盐城市政府采购网",
     "苏服务",
-    "盐南高新区",
-    "盐城开发区",
-    "盐城公共资源交易",
-    "大数据平台",
-    "都市招标",
-    "东方招标",
-    "江苏城南",
-    "盐城经开区",
-    "悦达",
+    "江苏省盐南高新区公共资源交易电子化服务平台",
+    "盐城经济技术开发区行政审批局公共资源交易服务平台",
+    "盐城市公共资源交易平台",
+    "盐城市大数据集团",
+    "盐城市都市建设投资集团有限公司",
+    "盐东方产业投资集团有限公司",
+    "江苏世纪新城投资控股集团有限公司",
+    "盐城经开城市发展投资集团有限公司",
+    "悦达集团阳光采购平台",
     "江苏招标采购服务平台",
 ]
 
 SITE_FILTER = {
-    "盐城政府网":       "区域关键词筛选（盐南高新区、经开区）",
-    "苏服务":           "选择区域（经开区、盐南高新区）",
-    "盐南高新区":       "全量采集（标记为盐南高新区，无需筛选）",
-    "盐城开发区":       "全量采集（标记为经开区，无需筛选）",
-    "盐城公共资源交易": "areaCode=320941(盐南)/320991(经开区)分类接口",
-    "大数据平台":       "全量采集（标记为区域内，无需筛选）",
-    "都市招标":         "全量采集（标记为经开区，无需筛选）",
-    "东方招标":         "关键词筛选（盐南高新区、经开区）",
-    "江苏城南":         "全量采集（标记为盐南高新区，无需筛选）",
-    "盐城经开区":       "全量采集（标记为经开区，无需筛选）",
-    "悦达":             "关键词筛选；排除横山/雅海项目",
-    "江苏招标采购服务平台": "regionCode=3209 + 保留亭湖/盐都/盐城市级",
+    "盐城市政府采购网":                      "区域关键词筛选（盐南高新区、经开区）",
+    "苏服务":                               "选择区域（经开区、盐南高新区）",
+    "江苏省盐南高新区公共资源交易电子化服务平台": "全量采集（盐南高新区专属平台）",
+    "盐城经济技术开发区行政审批局公共资源交易服务平台": "全量采集（经开区专属平台）",
+    "盐城市公共资源交易平台":               "areaCode=320971(盐南)/320941(经开)分类接口",
+    "盐城市大数据集团":                     "全量采集（盐南高新区大数据产业集团）",
+    "盐城市都市建设投资集团有限公司":       "全量采集（盐南高新区都市集团）",
+    "盐东方产业投资集团有限公司":           "全量采集（经开区东方集团）",
+    "江苏世纪新城投资控股集团有限公司":     "全量采集（盐南高新区城南集团）",
+    "盐城经开城市发展投资集团有限公司":      "全量采集（经开区城发平台）",
+    "悦达集团阳光采购平台":                 "关键词筛选；排除横山/雅海项目",
+    "江苏招标采购服务平台":                 "全域盐城（purchaser含盐南/经开关键词筛选）",
 }
 
 DARK_BLUE  = colors.HexColor("#1f4e79")
@@ -162,9 +162,9 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
 
     tbl_data = [[
         Paragraph("网站名称", h),
-        Paragraph(f"当日/前一日\n发布数（未分类）\n今:{today[5:]} 昨:{yesterday[5:]}", h),
-        Paragraph(f"当月发布数\n（未分类）\n{report_month}", h),
-        Paragraph(f"当月发布数\n（已分类）\n{report_month}", h),
+        Paragraph(f"当日/前一日\n重点招标发布数\n今:{today[5:]} 昨:{yesterday[5:]}", h),
+        Paragraph(f"当月\n重点招标发布数\n{report_month}", h),
+        Paragraph(f"当月\n非相关招标发布数\n{report_month}", h),
         Paragraph("数据筛选逻辑", h),
     ]]
 
@@ -214,87 +214,117 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
     note = _style(f, "NOTE", fontSize=8.5, textColor=colors.HexColor("#444444"),
                   leading=13, spaceBefore=0.35*cm)
     story.append(Paragraph(
-        '【分类说明】“当月已分类”项目已通过关键词规则标注标准大类/小类'
+        '【分类说明】”非相关招标”指已通过关键词规则归类为与公司业务无关的项目'
         '（如：建设工程、物业服务、法律服务、车辆采购、IT设备、'
-        '设计服务、垃圾与环卫、电梯服务等），'
-        '表示该类项目与公司业务方向不相关，已从商机池中剖除，仅作统计留存。'
-        '明细清单页仅展示“已分类”项目供参考；“未分类”项目为待人工研判的潜在商机。',
+        '设计服务、垃圾与环卫、电梯服务等），仅作统计留存，不进入商机池。'
+        '”重点招标”为尚未归类、需人工研判的潜在商机，明细清单页逐网站展示。',
         note
     ))
     return story
 
 
+LARGE_SITE_THRESHOLD = 8  # 记录数 >= 此值则单独占一页
+
+
+def _site_section(f: str, site: str, rows: List[dict]) -> list:
+    """渲染单个网站的标题 + 清单（或暂无提示）"""
+    items = []
+    sec = _style(f, f"sec{site}", fontSize=12, textColor=DARK_BLUE,
+                 spaceAfter=0.2*cm, spaceBefore=0.25*cm)
+    items.append(Paragraph(f"▌ {site}　重点招标清单（共{len(rows)}条）", sec))
+
+    if not rows:
+        empty = _style(f, f"emp{site}", fontSize=9,
+                       textColor=colors.HexColor("#888888"), leading=13, spaceAfter=0.2*cm)
+        items.append(Paragraph("本月暂无未分类项目", empty))
+        return items
+
+    h   = _style(f, f"DH{site}",  fontSize=9,   alignment=TA_CENTER, textColor=colors.white, leading=12)
+    cn  = _style(f, f"DCN{site}", fontSize=8.5, alignment=TA_LEFT,   leading=11)
+    cc  = _style(f, f"DCC{site}", fontSize=8.5, alignment=TA_CENTER, leading=11)
+    lnk = _style(f, f"DLK{site}", fontSize=7.5, textColor=colors.blue, alignment=TA_CENTER, leading=10)
+
+    tbl_data = [[
+        Paragraph("项目名称", h),
+        Paragraph("发布日期", h),
+        Paragraph("发包人", h),
+        Paragraph("项目金额\n（万元）", h),
+        Paragraph("开标时间", h),
+        Paragraph("链接", h),
+    ]]
+    for r in rows:
+        name = re.sub(r'^【[^】]{2,10}】', '', r["project_name"] or "").strip() or r["project_name"] or "—"
+        url  = r["detail_url"] or ""
+        link_cell = (
+            Paragraph(f"<link href='{url}' color='blue'><u>详情</u></link>", lnk)
+            if url else Paragraph("—", cc)
+        )
+        pub_dt  = (r["publish_date"] or "")[:10] or "—"
+        open_dt = (r["open_date"] or "")[:10] or "—"
+        tbl_data.append([
+            Paragraph(name, cn),
+            Paragraph(pub_dt, cc),
+            Paragraph((r["purchaser"] or "—").strip(), cn),
+            Paragraph(_fmt_amount(r["budget"]), cc),
+            Paragraph(open_dt, cc),
+            link_cell,
+        ])
+
+    tbl = Table(
+        tbl_data,
+        colWidths=[6.5*cm, 1.8*cm, 3.2*cm, 1.8*cm, 2.0*cm, 1.2*cm],
+        repeatRows=1
+    )
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0),  DARK_BLUE),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, ROW_ALT]),
+        ("GRID",          (0, 0), (-1, -1), 0.3, colors.grey),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 3),
+    ]))
+    items.append(tbl)
+    return items
+
+
 def detail_pages(f: str, all_records: List[dict]) -> list:
-    """第2页起：每个网站一页，只显示已分类项目"""
+    """第2页起：
+    - 12个网站全部显示（无数据显示暂无提示）
+    - 记录数 >= LARGE_SITE_THRESHOLD 的网站单独一页
+    - 其余网站连续排列，ReportLab自动续页
+    """
     story = []
 
     by_site: Dict[str, List[dict]] = defaultdict(list)
     for r in all_records:
-        if r["proj_major_cat"] is None:  # 只显示未分类（潜在商机）
+        if r["proj_major_cat"] is None:
             by_site[r["site_name"]].append(r)
 
-    if not by_site:
-        return story
+    # 有数据的网站按 SITE_ORDER 排列；0条的网站统一放最后合并显示
+    sites_with_data = [s for s in SITE_ORDER if by_site.get(s)]
+    sites_no_data   = [s for s in SITE_ORDER if not by_site.get(s)]
 
-    sorted_sites = sorted(by_site.keys(),
-                          key=lambda s: SITE_ORDER.index(s) if s in SITE_ORDER else 99)
+    prev_was_large = False
+    first = True
 
-    h   = _style(f, "DH",  fontSize=9,   alignment=TA_CENTER, textColor=colors.white, leading=12)
-    cn  = _style(f, "DCN", fontSize=8.5, alignment=TA_LEFT,   leading=11)
-    cc  = _style(f, "DCC", fontSize=8.5, alignment=TA_CENTER, leading=11)
-    lnk = _style(f, "DLK", fontSize=7.5, textColor=colors.blue, alignment=TA_CENTER, leading=10)
-
-    for site in sorted_sites:
-        story.append(PageBreak())
+    for site in sites_with_data:
         rows = by_site[site]
+        is_large = len(rows) >= LARGE_SITE_THRESHOLD
 
-        sec = _style(f, f"sec{site}", fontSize=13, textColor=DARK_BLUE,
-                     spaceAfter=0.3*cm, spaceBefore=0.1*cm)
-        story.append(Paragraph(f"▌ {site}　招标公告清单（共{len(rows)}条）", sec))
+        if first or is_large or prev_was_large:
+            story.append(PageBreak())
+            first = False
 
-        tbl_data = [[
-            Paragraph("项目名称", h),
-            Paragraph("发布日期", h),
-            Paragraph("发包人", h),
-            Paragraph("项目金额\n（万元）", h),
-            Paragraph("开标时间", h),
-            Paragraph("链接", h),
-        ]]
+        story.extend(_site_section(f, site, rows))
+        prev_was_large = is_large
 
-        for r in rows:
-            name = re.sub(r'^【[^】]{2,10}】', '', r["project_name"] or "").strip() or r["project_name"] or "—"
-            url  = r["detail_url"] or ""
-            link_cell = (
-                Paragraph(f"<link href='{url}' color='blue'><u>详情</u></link>", lnk)
-                if url else Paragraph("—", cc)
-            )
-            pub_dt  = (r["publish_date"] or "")[:10] or "—"
-            open_dt = (r["open_date"] or "")[:10] or "—"
-            tbl_data.append([
-                Paragraph(name, cn),
-                Paragraph(pub_dt, cc),
-                Paragraph((r["purchaser"] or "—").strip(), cn),
-                Paragraph(_fmt_amount(r["budget"]), cc),
-                Paragraph(open_dt, cc),
-                link_cell,
-            ])
-
-        tbl = Table(
-            tbl_data,
-            colWidths=[6.5*cm, 1.8*cm, 3.2*cm, 1.8*cm, 2.0*cm, 1.2*cm],
-            repeatRows=1
-        )
-        tbl.setStyle(TableStyle([
-            ("BACKGROUND",    (0, 0), (-1, 0),  DARK_BLUE),
-            ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, ROW_ALT]),
-            ("GRID",          (0, 0), (-1, -1), 0.3, colors.grey),
-            ("VALIGN",        (0, 0), (-1, -1), "TOP"),
-            ("TOPPADDING",    (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING",   (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING",  (0, 0), (-1, -1), 3),
-        ]))
-        story.append(tbl)
+    # 0条网站合并到最后一页（接续上一段或另起）
+    if sites_no_data:
+        story.append(PageBreak())
+        for site in sites_no_data:
+            story.extend(_site_section(f, site, []))
 
     return story
 

@@ -1,36 +1,36 @@
 # 盐城市全域招标信息采集系统 Pro
 
-盐城市 12 个招标网站的数据采集、富化、分类和导出系统。
+盐城市 12 个招标网站的数据采集、富化、分类和报告生成系统。
 
-**当前版本**：v1.6 | **数据量**：3920 条原始记录 | **最后更新**：2026-06-22
+**当前版本**：v1.7 | **数据量**：3860 条原始记录 | **最后更新**：2026-06-22
 
 ## 覆盖站点（12个）
 
 | 站点 | 说明 | 采集方式 |
 |------|------|--------|
-| jszbcg | 江苏招标采购服务平台（盐城） | REST API + PDF→MD |
-| yancheng_gov | 盐城政府采购网 | HTML 详情页 |
-| ycggzy | 盐城公共资源交易平台 | REST API（SPA） |
-| sufu | 苏服采 | REST API |
-| yueda | 悦达阳光采购平台 | HTML 详情页 |
-| dongfang | 东方新锐招标 | HTML 详情页 |
-| jscn | 江苏世纪新城 | HTML 详情页 |
-| dushi | 都市建设投资 | HTML 详情页 |
-| chennan | 盐南高新区交易网 | HTML 详情页 |
-| kaifaqu | 盐城开发区交易网 | HTML 详情页 |
-| bigdata | 大数据产业集团 | HTML 详情页 |
-| jingkai | 盐城经开区城发 | HTML 详情页 |
+| jszbcg | 江苏招标采购服务平台 | REST API + PDF→MD |
+| yancheng_gov | 盐城市政府采购网 | HTML 详情页 |
+| ycggzy | 盐城市公共资源交易平台 | REST API（SPA） |
+| sufu | 苏服务 | REST API |
+| yueda | 悦达集团阳光采购平台 | HTML 详情页 |
+| dongfang | 盐东方产业投资集团有限公司 | HTML 详情页 |
+| jscn | 江苏世纪新城投资控股集团有限公司 | HTML 详情页 |
+| dushi | 盐城市都市建设投资集团有限公司 | HTML 详情页 |
+| chennan | 江苏省盐南高新区公共资源交易电子化服务平台 | HTML 详情页 |
+| kaifaqu | 盐城经济技术开发区行政审批局公共资源交易服务平台 | HTML 详情页 |
+| bigdata | 盐城市大数据集团 | HTML 详情页 |
+| jingkai | 盐城经开城市发展投资集团有限公司 | HTML 详情页 |
 
-## 数据质量（2026-06-21）
+## 数据质量（2026-06-22）
 
 | 字段 | 填充数 | 填充率 |
 |------|--------|--------|
-| purchaser（发包单位） | 3130 / 3920 | 80% |
-| budget（预算金额） | 1538 / 3920 | 39% |
-| open_date（开标时间） | 1133 / 3920 | 29% |
-| winner（中标单位） | 1230 / 3920 | 31% |
+| purchaser（发包单位） | 3715 / 3860 | 96% |
+| budget（预算金额） | 1601 / 3860 | 41% |
+| open_date（开标时间） | 1327 / 3860 | 34% |
+| winner（中标单位） | 1269 / 3860 | 33% |
 | std_district（行政区划） | ~98% | — |
-| std_category（项目分类） | 47% | 规则持续扩充 |
+| std_category（项目分类） | 48% | 规则持续扩充 |
 
 ## 目录结构
 
@@ -54,10 +54,15 @@ export_excel.py           导出 Excel
 run_collection.py         采集入口（支持 --days / --site）
 run_daily.sh              每日全流程脚本（凌晨 2 点）
 
+generate_tender_report.py       盐开招标公告月报（PDF）
+generate_countdown_report_pdf.py 盐开开标倒计时报告（PDF）
+generate_countdown_report.py    盐开开标倒计时报告（Excel 备用）
+
 download_jszbcg_pdfs.py        jszbcg PDF 历史批量下载（初始化用）
 download_site_pages.py         HTML 站详情页历史批量下载（初始化用）
 rename_pages.py                按项目名重命名 MD 缓存文件
 reenrich_ycggzy.py             ycggzy 专项补采（发包单位从列表 API 回填）
+cleanup_art_20171_dupes.py     清理 yancheng_gov art_20171 脏数据（默认dry-run）
 
 # yancheng_gov 专项工具（Playwright，按需运行）
 enrich_yancheng_gov.py         yancheng_gov 完整补全（Playwright + 表格专项解析）
@@ -74,7 +79,7 @@ data/
   pdfs/jszbcg/            jszbcg 本地 PDF 缓存（~1300 个，616MB）
   pages/{site}/           各站详情页本地 MD 缓存（~1130 个）
 
-output/                   导出的 Excel 文件
+output/                   导出的 Excel / PDF 文件
 logs/                     运行日志
 ```
 
@@ -90,7 +95,7 @@ v1.4 起，所有富化操作均基于本地 MD 文件，重跑无需联网：
 ## 依赖安装
 
 ```bash
-pip install requests beautifulsoup4 lxml pymupdf paddleocr openpyxl html2text
+pip install requests beautifulsoup4 lxml pymupdf paddleocr openpyxl html2text reportlab
 ```
 
 > PaddleOCR 首次运行会自动下载模型（约 100MB）
@@ -111,7 +116,11 @@ python3 add_std_district.py
 python3 add_std_category.py
 python3 build_unified.py
 
-# 4. 导出 Excel
+# 4. 生成报告
+python3 generate_tender_report.py          # 盐开月报
+python3 generate_countdown_report_pdf.py   # 盐开开标倒计时
+
+# 5. 导出 Excel（可选）
 python3 export_excel.py
 ```
 
@@ -137,8 +146,6 @@ python3 -c "from enrich_details import enrich_site; enrich_site('jscn')"
 
 ### yancheng_gov Playwright 补全（WAF 绕过，按需）
 
-yancheng_gov 部分记录因知道创宇 WAF 返回 403，需 Playwright 补全：
-
 ```bash
 # 轻量版（只处理 detail_fetched=2 的记录）
 python3 enrich_yancheng_gov_playwright.py
@@ -151,7 +158,7 @@ python3 enrich_yancheng_gov.py
 
 ```bash
 # ycggzy 是 SPA，purchaser 来自列表 API，不走 enrich_details
-python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-21
+python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 ```
 
 ## 分类体系

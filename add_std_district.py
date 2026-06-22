@@ -195,6 +195,12 @@ for site in SITES:
         # 2b. region 字段关键词（jszbcg 路径；ycggzy 县名等）
         if not d:
             d = from_text(row["region"])
+        # 2c. jszbcg 专项：purchaser 明确含盐南/经开关键词则覆盖 region 派生的行政区
+        #     （盐南高新区跨亭湖/盐都，行政路径不准确，以发包主体为准）
+        if site == "jszbcg":
+            d_purch = from_text(row["purchaser"] or "")
+            if d_purch in ("盐南", "经开"):
+                d = d_purch
         # 3. 站点硬编码
         if not d:
             d = hardcode

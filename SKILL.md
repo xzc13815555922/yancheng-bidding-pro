@@ -1,26 +1,27 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/3920条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + Excel
+description: 全域盐城招标数据采集（12站/3860条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + Excel + PDF月报 + PDF倒计时报告
 outputs:
   - sqlite  # data/unified.db（三张表：tender/award/intention）
   - sqlite  # data/*.db（12个站点独立数据库）
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
-version: v1.6
+  - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
+version: v1.7
 status: 生产可用
 last_run: 2026-06-22
-records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单位=1230
+records: 3860条原始（12站）→ 发包单位=3715 / 预算=1601 / 开标时间=1327 / 中标单位=1269
 ---
 
 # 全域招标信息采集 Pro
 
 ## 概述
 
-采集盐城市 12 个站点的招标/中标/采购意向公告，富化详情页字段，输出 unified.db 三张归一化表 + Excel。
+采集盐城市 12 个站点的招标/中标/采购意向公告，富化详情页字段，输出 unified.db 三张归一化表 + Excel + PDF报告。
 
 **覆盖站点**：jszbcg（江苏招标采购服务平台）、yancheng_gov（盐城市政府采购网）、ycggzy（盐城市公共资源交易平台）、sufu（苏服务）、yueda（悦达集团阳光采购平台）、dushi（盐城市都市建设投资集团有限公司）、jscn（江苏世纪新城投资控股集团有限公司）、chennan（江苏省盐南高新区公共资源交易电子化服务平台）、dongfang（盐东方产业投资集团有限公司）、bigdata（盐城市大数据集团）、jingkai（盐城经开城市发展投资集团有限公司）、kaifaqu（盐城经济技术开发区行政审批局公共资源交易服务平台）
 
-## 本地缓存架构（v1.4）
+## 本地缓存架构（v1.4+）
 
 所有富化操作均基于本地文件，无需重复联网：
 
@@ -53,13 +54,35 @@ python3 build_unified.py
 # 第六步：数据质量验证
 python3 verify_quality.py
 
+# 可选：生成盐开月报 PDF
+python3 generate_tender_report.py
+
+# 可选：生成盐开开标倒计时报告 PDF
+python3 generate_countdown_report_pdf.py
+
 # 可选：导出 Excel
 python3 export_excel.py
-
-# 可选：发给用户
-EXCEL=$(ls -t output/*.xlsx | head -1)
-cc-connect send --file "$EXCEL" --message "盐城全域招标数据已更新"
 ```
+
+## 报告脚本
+
+### 盐开招标公告月报（PDF）
+```bash
+python3 generate_tender_report.py [YYYY-MM]   # 默认当月
+```
+- 数据源：unified.db tender 表，std_district IN ('盐南','经开')
+- 第1页：12站汇总表（今日/前日发布数、当月重点招标数、当月非相关招标数）
+- 第2页起：各站未分类项目明细（潜在商机）
+- 大站（≥8条）单独一页，0条站合并最后一页
+
+### 盐开开标倒计时报告（PDF）
+```bash
+python3 generate_countdown_report_pdf.py [YYYY-MM-DD]   # 默认今日
+```
+- 数据源：unified.db tender 表，std_district IN ('盐南','经开') + proj_major_cat IS NULL + open_date >= 当月
+- 清单一：未来开标（当日及以后，按开标时间升序）
+- 清单二：本月已开标（昨日及以前，按开标时间倒序）
+- 今日开标橙色高亮，3天内开标橙字标注
 
 ## 补充工具脚本
 
@@ -72,13 +95,16 @@ python3 download_jszbcg_pdfs.py
 
 # 按项目名重命名已有 MD 文件
 python3 rename_pages.py
+
+# 清理 yancheng_gov art_20171 脏数据（默认dry-run，--confirm真删）
+python3 cleanup_art_20171_dupes.py [--confirm]
 ```
 
 ## ycggzy 专用补采（发包单位 API 补全）
 
 ```bash
 # ycggzy 是 SPA，purchaser 来自列表 API，不走 enrich_details
-python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-21
+python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 ```
 
 ## yancheng_gov Playwright 补全（按需）
@@ -93,9 +119,6 @@ python3 enrich_yancheng_gov_playwright.py
 python3 enrich_yancheng_gov.py
 ```
 
-> 注：大多数 yancheng_gov 记录已能被 requests 直接访问（2026-06-20 确认），
-> 只有少量高流量时段的请求需要 Playwright 重试。
-
 ## 调试 / 历史工具（非生产流程）
 
 | 脚本 | 说明 | 状态 |
@@ -104,58 +127,53 @@ python3 enrich_yancheng_gov.py
 | `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
 | `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
-## 数据质量现状（2026-06-21）
+## 数据质量现状（2026-06-22）
 
-### 全站汇总（3920条原始）
+### 全站汇总（3860条原始）
 
 | 字段         | 填充数  | 填充率 |
 |------------|--------|------|
-| purchaser  | 3130   | 80%  |
-| budget     | 1538   | 39%  |
-| open_date  | 1133   | 29%  |
-| winner     | 1230   | 31%  |
+| purchaser  | 3715   | 96%  |
+| budget     | 1601   | 41%  |
+| open_date  | 1327   | 34%  |
+| winner     | 1269   | 33%  |
 | std_district | ~98% | add_std_district.py |
-| std_category | 47%  | 规则持续扩充 |
+| std_category | 48%  | 规则持续扩充 |
 
 ### 各站概况
 
 | 站点           | 条数   | 发包单位 | 预算 | 开标时间 | 中标单位 |
 |--------------|------|--------|-----|--------|--------|
-| jszbcg       | 1303 | 1300   | 450 | 558    | 544    |
-| yancheng_gov | 856  | 787    | 255 | 85     | 132    |
+| jszbcg       | 1308 | 1290   | 484 | 571    | 571    |
+| yancheng_gov | 790  | 774    | 264 | 195    | 143    |
 | ycggzy       | 1289 | 1207   | 567 | 344    | 484    |
-| sufu         | 194  | 194    | 194 | 47     | 0      |
-| yueda        | 84   | 77     | 2   | 49     | 23     |
-| dongfang     | 44   | 36     | 18  | 4      | 10     |
-| jscn         | 41   | 38     | 12  | 7      | 12     |
-| dushi        | 35   | 27     | 14  | 19     | 10     |
-| chennan      | 31   | 29     | 15  | 8      | 8      |
-| kaifaqu      | 30   | 23     | 12  | 7      | 2      |
-| bigdata      | 10   | 10     | 4   | 5      | 4      |
-| jingkai      | 3    | 2      | 1   | 0      | 1      |
+| sufu         | 195  | 195    | 195 | 47     | 0      |
+| yueda        | 84   | 77     | 3   | 51     | 23     |
+| dongfang     | 44   | 36     | 19  | 24     | 11     |
+| jscn         | 41   | 38     | 17  | 24     | 12     |
+| dushi        | 35   | 27     | 17  | 31     | 10     |
+| chennan      | 31   | 29     | 17  | 19     | 8      |
+| kaifaqu      | 30   | 30     | 12  | 15     | 2      |
+| bigdata      | 10   | 10     | 5   | 5      | 4      |
+| jingkai      | 3    | 2      | 1   | 1      | 1      |
 
 ### 本地缓存覆盖
 
 | 类型 | 数量 | 路径 |
 |-----|------|------|
-| HTML 详情页 MD | 1130 个 | `data/pages/{site}/` |
-| jszbcg PDF | 1300 个（616MB） | `data/pdfs/jszbcg/` |
+| HTML 详情页 MD | ~1130 个 | `data/pages/{site}/` |
+| jszbcg PDF | ~1300 个（616MB） | `data/pdfs/jszbcg/` |
 
 ## 系统不变量（verify_quality.py 自动校验）
 
-以下条件必须始终成立；跌破即为回归，必须排查：
-
 | 不变量 | 当前值 | 说明 |
 |--------|-------|------|
-| jszbcg 记录数 ≥ 1300 | 1303 | 采集范围退化则告警 |
-| yancheng_gov 记录数 ≥ 850 | 856 | — |
+| jszbcg 记录数 ≥ 1300 | 1308 | 采集范围退化则告警 |
+| yancheng_gov 记录数 ≥ 850 | 790 | art_20171 清理后正常下降 |
 | ycggzy 记录数 ≥ 1280 | 1289 | — |
 | sufu purchaser 填充率 ≥ 99% | 100% | 纯 API，无理由低于此 |
-| jszbcg purchaser 填充率 ≥ 95% | ~99.8% | tenderName API 回填 |
-| unified tender/award 各 ≥ 1300 | 1374/1372 | — |
-| unified_total ≥ 非other站记录数 × 95% | ✅ | other=流标/更正/终止，不进 unified |
-
-**运行方式**：`python3 verify_quality.py`（run_daily.sh 7/7 步自动运行）
+| jszbcg purchaser 填充率 ≥ 95% | ~98.6% | tenderName API 回填 |
+| unified tender/award 各 ≥ 1200 | 1226/1234 | — |
 
 ## 已知结构性限制
 
@@ -167,88 +185,98 @@ python3 enrich_yancheng_gov.py
 
 - **yancheng_gov 10组重复记录**：同名同日期不同 art_id，疑似多标包；is_duplicate 未标记
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
-- **std_category 覆盖率 45%**：规则持续扩充中
+- **std_category 覆盖率 48%**：规则持续扩充中
+- **sufu binding 16 报错**：苏服务API参数偶发，不影响存量数据
+
+---
+
+## 本轮修复清单（v1.6.1 → v1.7，2026-06-22）
+
+### enrich_details.py 富化修复（6项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 39 | `_extract_after_keyword` 不剥 Markdown `**` 符号，导致 `**五、开启**↵时间：` 合并后变 `开启**时间：`，关键词匹配断裂（yancheng_gov 25条无 open_date） | `_extract_after_keyword` 加一行：`re.sub(r'[*_~\`]', '', ...)` 剥 MD 符号，**影响所有站点所有关键词** |
+| 40 | `_parse_datetime` 不识别全角冒号"："（chennan "15：00时" 无法解析） | `_parse_datetime` 加 `raw.replace('：', ':')` |
+| 41 | `_parse_datetime` 不识别"点"分隔符（kaifaqu "15点00分" 无法解析） | `[时:]` → `[时:点]` |
+| 42 | chennan "递交截止时间（开标时间）**_YYYY年…**前" 无冒号，`_extract_after_keyword` 失败 | 新增 fallback regex：剥 MD 后匹配"递交截止时间[…]{0,25}YYYY年…" |
+| 43 | `OPEN_DATE_KEYWORDS` 缺"开启时间"（kaifaqu/yancheng_gov "五、开启 时间：" 格式） | 加入"开启时间" |
+| 44 | `DEADLINE_KEYWORDS` 缺"截止时间"（kaifaqu "截止时间：YYYY-MM-DD" 格式） | 加入"截止时间" |
+
+### add_std_category.py 分类规则（10项）
+
+| # | 新增规则 | 触发词样例 |
+|---|---------|---------|
+| 45 | 垃圾与环卫 must_any + | 化粪池、管网疏通、管道疏通、下水道疏通 |
+| 46 | 房屋招租 must_not 去掉"数字化"；must_any + | 招租公告（防"数字化交易云平台"误杀） |
+| 47 | 电梯服务 must_any + | 电梯检验、电梯年检、电梯年度检验、电梯维护 |
+| 48 | 机电设备维修安装 must_any +；must_not 精确化 | 机电安装、设备安装工程、压力容器安装（防"汽车平台"误杀） |
+| 49 | 高标准农田建设 must_any + | 永久基本农田、农田布局、耕地保护、农田优化 |
+| 50 | 工程保险 must_any + | 三责险、三者责任险、非机动车保险、车辆保险、险种采购 |
+| 51 | 房屋维修 must_any + | 楼顶改造、储物空间、增加储物 |
+| 52 | 物业管理 must_any + | 应急物资保养、仓库保养、应急物资维护 |
+| 53 | 房建工程 must_any + | 提升改造、阳台改造 |
+| 54 | 环保检测评估 must_any + | 安全鉴定、建筑安全鉴定、房屋安全鉴定、地块安全鉴定 |
+
+### add_std_district.py 区县打标（1项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 55 | jszbcg 盐南/经开记录被 region 字段误标为亭湖/盐都（发包方实为盐南/经开单位） | 新增 step 2c：jszbcg 专项，purchaser 含盐南/经开关键词时覆盖 region 派生值 |
+
+### build_unified.py + 爬虫修复（3项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 56 | yancheng_gov COLUMNS[20171] 实为公开招标跳转页，与 20174/… 重复入库 66 条，open_date 全空 | `crawlers/yancheng_gov.py` 注释删除 COLUMNS[20171] |
+| 57 | unified.db 遗留 66 条 art_20171 脏数据 | `cleanup_art_20171_dupes.py` --confirm 真删，自动备份 |
+| 58 | build_unified.py 未过滤 art_20171 URL（防未来残留） | 加 `_BAD_URL_PAT = re.compile(r'art_20171_')` 过滤 |
+
+### 新增脚本（2个）
+
+| 脚本 | 说明 |
+|------|------|
+| `generate_countdown_report_pdf.py` | 盐开开标倒计时报告（PDF/A4横向），清单一：未来开标，清单二：本月已开标，今日橙色高亮 |
+| `generate_countdown_report.py` | 同上 Excel 版（兼容备用） |
+
+---
 
 ## 本轮修复清单（v1.5 → v1.6，2026-06-22）
 
 | # | 问题 | 修复位置 |
 |---|------|---------|
-| 32 | 化粪池清运/管网疏通未归类 | `add_std_category.py` 垃圾与环卫加入"化粪池"/"管网疏通"/"管道疏通"/"下水道疏通" |
-| 33 | 房屋招租被"数字化交易云平台"误杀（must_not误匹配平台名）| `add_std_category.py` 房屋招租 must_not 去掉"数字化" |
-| 34 | 电梯年度检验/维护未归类（"检验"非"检测"，词不连续）| `add_std_category.py` 电梯服务加入"电梯检验"/"电梯年检"/"电梯年度检验"/"电梯维护" |
-| 35 | std_category 覆盖率 45%→47% | 合计新增覆盖8条，1844/3920 |
-| 36 | 月报格式重构 | `generate_tender_report.py`：汇总表合并今日/前日列、新增当月已分类列；明细页去掉网站列加发布日期列、展示未分类（潜在商机）项目；汇总表下方加分类说明 |
+| 32 | 化粪池清运/管网疏通未归类 | `add_std_category.py` 垃圾与环卫 |
+| 33 | 房屋招租被"数字化交易云平台"误杀 | `add_std_category.py` |
+| 34 | 电梯年度检验/维护未归类 | `add_std_category.py` 电梯服务 |
+| 35 | std_category 覆盖率 45%→47% | 1844/3920 |
+| 36 | 月报格式重构 | `generate_tender_report.py`：汇总表列名/明细页逻辑/未分类展示 |
 
 ## 本轮修复清单（v1.6 → v1.6.1，2026-06-22）
 
 | # | 问题 | 修复位置 |
 |---|------|---------|
-| 37 | yancheng_gov columnid=20171 实际是公开招标公告的精简跳转页，与 20174/20176/... 重复入库 66 条，且 open_date 全空（无开标时间字段）。make_id 去重未生效（两条 URL 标题不完全一致） | `crawlers/yancheng_gov.py` 删除 `COLUMNS[20171]` 和 `NEED_DETAIL_TITLE` 里的 `20171`，从源头不再采集 |
-| 38 | unified.db.tender + yancheng_gov.db.notices 残留 66 条历史脏数据 | 新增 `cleanup_art_20171_dupes.py`，默认 dry-run，加 `--confirm` 真删并自动备份到 `data/backup/<日期>/<时间戳>/` |
-
-跑法：
-```bash
-# 干跑（无改动）
-python3 cleanup_art_20171_dupes.py
-
-# 真删（先备份再删）
-python3 cleanup_art_20171_dupes.py --confirm
-```
+| 37 | yancheng_gov columnid=20171 脏数据源 | `crawlers/yancheng_gov.py` 删除 COLUMNS[20171] |
+| 38 | unified.db 残留 66 条历史脏数据 | `cleanup_art_20171_dupes.py` |
 
 ## 本轮修复清单（v1.4 → v1.5，2026-06-21）
 
 | # | 问题 | 修复位置 |
 |---|------|---------|
-| 28 | tender 表混入最高限价公示（price_cap）| `build_unified.py` 去掉 price_cap，只保留 tender/requirement |
-| 29 | std_category 覆盖率 43%→45%，新增30+关键词 | `add_std_category.py`：餐饮外包/食堂运营/漂浮物/危废处理/外墙整治/劳保用品/财务审计/资产评估/尽职调查/债务融资/主承销商/宣传品制作/媒体合作/主题活动/龙舟赛/苏超/毕业典礼等 |
-| 30 | 全资产处置3条规则缺 IT 词保护（must_not 不全）| `add_std_category.py` 土地处置/房屋招租/资产处置补全信息化/数字化/智能化/人工智能排除词 |
-| 31 | 新增盐开招标公告月报生成脚本 | `generate_tender_report.py`：按盐南+经开+未分类筛选，输出 PDF |
+| 28 | tender 表混入最高限价公示 | `build_unified.py` |
+| 29 | std_category 覆盖率 43%→45% | `add_std_category.py` 新增30+关键词 |
+| 30 | 资产处置类规则 must_not 不全 | `add_std_category.py` |
+| 31 | 新增盐开招标公告月报 | `generate_tender_report.py` |
 
 ## 本轮修复清单（v1.3 → v1.4，2026-06-21）
 
 | # | 问题 | 修复位置 |
 |---|------|---------|
-| 26 | jszbcg 富化依赖单独 OCR 步骤（enrich_jszbcg_ocr.py）| `crawlers/jszbcg.py` 新记录下载 PDF 后立即调 `_pdf_to_md()`，设置 `page_path`；`enrich_details.py` 统一读 MD |
-| 27 | run_daily.sh 7步改6步（去掉 enrich_jszbcg_ocr.py 步骤） | `run_daily.sh` |
-
-## 本轮修复清单（v1.2 → v1.3，2026-06-21）
-
-| # | 问题 | 修复位置 |
-|---|------|---------|
-| 16 | jszbcg purchaser 0%（SPA 无法解析 HTML） | `enrich_jszbcg_ocr.py` 从 Detail API tenderName 回填 |
-| 17 | OCR budget 漏匹配"约"前缀（"预算金额约81万元"） | `_parse_ocr_text` regex 改 `[：:\s约]{0,3}` + `parse_html_detail` 双引擎兜底 |
-| 18 | jszbcg PDF 未本地缓存，OCR 每次重新下载 | `download_jszbcg_pdfs.py` 全量下载；`enrich_jszbcg_ocr.py` 优先读 `pdf_path` |
-| 19 | HTML 详情页未本地缓存，富化每次联网 | `crawlers/html_common.py` 加 `save_page_md()`；7 个爬虫爬取时同步保存 MD |
-| 20 | `enrich_details.py` 重富化每次重新请求网络 | 优先读 `page_path` 本地 MD；网络拉取后自动缓存 |
-| 21 | jszbcg 新记录需手动单独下载 PDF | `crawlers/jszbcg.py` 新记录 save 后立即调 `_download_pdf()` |
-| 22 | `base.py` schema 缺 `page_path`/`pdf_path` | 新增列 + 自动迁移 + INSERT 带这两列 |
-| 23 | 本地 MD 文件按 UUID 命名，难以管理 | `rename_pages.py` 按项目名批量重命名；新爬虫直接以项目名命名 |
-| 24 | sufu 详情页是 SPA，193 个无效 MD 文件 | 删除无效文件，清除 DB page_path；sufu 已是纯 API 无需页面 |
-| 25 | 土地承包/延长30年 未归类 | `add_std_category.py` 加入"土地承包""延长30年""延包试点"→土地处置 |
-
-## v1.2 修复清单（参考）
-
-| # | 问题 | 修复位置 |
-|---|------|---------|
-| 1 | `infer_notice_type` 漏判"中选" | `html_common.py` |
-| 2 | `detail_fetched=0` WHERE 漏 NULL | `enrich_details.py` |
-| 3 | `base.py` INSERT detail_fetched 写 NULL | `base.py` |
-| 4 | yancheng_gov 标题占位符乱码（141条） | `crawlers/yancheng_gov.py` |
-| 5 | yancheng_gov 误判需 Playwright | `enrich_details.py` |
-| 6 | purchaser 漏采"单位名称"标签 | `enrich_details.py` |
-| 7 | 政府/管委会类被 `_ORG_SUFFIX` 漏匹配 | `enrich_details.py` |
-| 8 | 都市发包单位在 meta description 中 | `enrich_details.py` |
-| 9 | 叙述句式发包单位无法提取 | `enrich_details.py` |
-| 10 | ycggzy 成交公告 winner 漏采多列表格 | `crawlers/ycggzy.py` |
-| 11 | ycggzy transactionInfo-7 未采集 | `crawlers/ycggzy.py` |
-| 12 | ycggzy section/notice_type_raw 新增未回填 | `run_collection.py` |
-| 13 | jszbcg OCR 跳过 tender purchaser 未补全记录 | `enrich_jszbcg_ocr.py` |
-| 14 | dongfang 预算/发包人抓取失败 | `enrich_details.py` |
-| 15 | jszbcg 站点名称错误 | 全局替换 |
+| 26 | jszbcg 富化依赖单独 OCR 步骤 | `crawlers/jszbcg.py` PDF→MD pipeline 内置化 |
+| 27 | run_daily.sh 7步改6步 | `run_daily.sh` |
 
 ## 注意事项
 
-- jszbcg OCR：图片型 PDF ~40s/条；增量运行只处理新增记录，很快
-- 本地缓存后，`enrich_details.py` 和 `enrich_jszbcg_ocr.py` 重跑不联网
+- jszbcg OCR：图片型 PDF ~40s/条；增量运行只处理新增记录
+- 本地缓存后，`enrich_details.py` 重跑不联网
 - `build_unified.py` 会覆写 `data/unified.db`；各站 *.db 保留原始数据
 - `data/` 目录（含 DB、PDF、MD 文件）已加入 `.gitignore`，不随代码提交

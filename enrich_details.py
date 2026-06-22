@@ -63,8 +63,8 @@ _BUDGET_INLINE_RE = [
     re.compile(r'采购规模[：:\s约]{0,4}([\d.]+)\s*(万元|亿元|元)'),
 ]
 BUDGET_EXCLUDE = ["保证金", "履约金", "押金", "违约金"]
-OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期"]
-DEADLINE_KEYWORDS   = ["报名截止", "投标截止", "截标时间", "递交截止", "报名截止时间"]
+OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期", "开启时间"]
+DEADLINE_KEYWORDS   = ["报名截止", "投标截止", "截标时间", "递交截止", "报名截止时间", "截止时间"]
 EXPECTED_KEYWORDS   = ["预计挂网时间", "预计发布时间", "预计挂网日期", "预计公告时间"]
 WINNER_KEYWORDS     = ["中标单位", "中标供应商", "成交供应商", "中标人",
                        "中标候选人第一名", "中标候选人", "中标侯选人",
@@ -136,7 +136,7 @@ def _is_valid_purchaser(name: str) -> bool:
 def _extract_after_keyword(text: str, keywords: list, window: int = 100) -> Optional[str]:
     """在 text 中找 keyword，要求后5字内有冒号（避免误匹配句子中的关键字），
     返回冒号后 window 字符（去空白）。"""
-    t = re.sub(r'\s+', '', text)
+    t = re.sub(r'[*_~`]', '', re.sub(r'\s+', '', text))   # 去空白 + Markdown符号
     for kw in keywords:
         kw_stripped = re.sub(r'\s+', '', kw)
         # keyword后0-5个任意字符+冒号
@@ -177,9 +177,10 @@ def _parse_datetime(raw: str) -> Optional[str]:
         return None
     raw = re.sub(r'[*_~`]', '', raw)   # 去除 Markdown 强调符号（chennan 等站点常见）
     raw = re.sub(r'\s+', '', raw)
+    raw = raw.replace('：', ':')        # 全角冒号→半角（chennan "15：00时" 格式）
     patterns = [
-        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:](\d{1,2})分?(\d{1,2})?秒?',
-        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:](\d{1,2})',
+        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:点](\d{1,2})分?(\d{1,2})?秒?',
+        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:点](\d{1,2})',
         r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})时',  # H时 without minutes
         r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})',
     ]
@@ -362,6 +363,17 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                 r'[（(]?(?:投标截止时间|截标时间|递交截止时间)[^）)]{0,10}[）)]?\s*为\s*'
                 r'(\d{4}年\d{1,2}月\d{1,2}日?\s*\d{1,2}时\d{0,2})',
                 text
+            )
+            if m:
+                dt = _parse_datetime(m.group(1))
+                if dt:
+                    result["deadline"] = dt
+        # fallback: 剥离 MD 标记后匹配"递交截止时间(开标时间)**_YYYY年..."（chennan 格式）
+        if not result.get("deadline"):
+            _ct = re.sub(r'[*_~`]', '', re.sub(r'\s+', '', text)).replace('：', ':')
+            m = re.search(
+                r'(?:递交截止|投标截止|截标时间)[^:\d]{0,25}(\d{4}年\d{1,2}月\d{1,2}日\d{1,2}:\d{2})',
+                _ct
             )
             if m:
                 dt = _parse_datetime(m.group(1))
