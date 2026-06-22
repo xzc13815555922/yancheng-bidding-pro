@@ -109,6 +109,15 @@ class SiteDB:
             old_dft = existing["detail_fetched"]
             # 只有当旧记录尚未补全(0)且新记录已补全(1)时才覆盖补全字段
             if old_dft != 1 and new_dft == 1:
+                # 更新全字段（含 purchaser/winner/winning_amount，从详情页补全的）
+                # 用 helper 补齐 record 缺少的 key，避免 binding 错误
+                update_cols = [
+                    "notice_type", "publish_date", "project_name", "budget", "budget_text",
+                    "budget_unit", "purchaser", "purchaser_raw", "open_date", "deadline",
+                    "expected_list", "winner", "winning_amount", "region", "district_code",
+                    "detail_url", "source_url", "raw_json", "detail_fetched", "page_path",
+                ]
+                params = self._build_params(record, update_cols)
                 conn.execute("""
                     UPDATE notices SET
                         notice_type=:notice_type, publish_date=:publish_date,
@@ -121,8 +130,17 @@ class SiteDB:
                         raw_json=:raw_json, detail_fetched=:detail_fetched,
                         page_path=COALESCE(:page_path, page_path)
                     WHERE id=:id
-                """, record)
+                """, {**params, "id": record["id"]})
             else:
+                # 旧记录已补全 或 新记录未补全：保留旧补全结果，只更新基本信息
+                # 不覆盖 purchaser/winner/winning_amount（这些是详情页补全的）
+                update_cols = [
+                    "notice_type", "publish_date", "project_name", "budget", "budget_text",
+                    "budget_unit", "purchaser_raw", "open_date", "deadline",
+                    "expected_list", "region", "district_code",
+                    "detail_url", "source_url", "raw_json", "page_path",
+                ]
+                params = self._build_params(record, update_cols)
                 conn.execute("""
                     UPDATE notices SET
                         notice_type=:notice_type, publish_date=:publish_date,
@@ -134,7 +152,7 @@ class SiteDB:
                         raw_json=:raw_json,
                         page_path=COALESCE(:page_path, page_path)
                     WHERE id=:id
-                """, record)
+                """, {**params, "id": record["id"]})
             conn.commit()
             return False
         else:
@@ -148,10 +166,25 @@ class SiteDB:
             placeholders = ", ".join(f":{c}" for c in cols)
             conn.execute(
                 f"INSERT INTO notices ({', '.join(cols)}) VALUES ({placeholders})",
-                {c: (record.get(c) if c != "detail_fetched" else record.get(c, 0)) for c in cols},
+                self._build_params(record, cols),
             )
             conn.commit()
             return True
+
+    @staticmethod
+    def _build_params(record: Dict, cols: List[str]) -> Dict:
+        """
+        从 record 构建 INSERT/UPDATE 的参数字典。
+        - 缺 key 补 None（避免 sqlite3 binding N 错误）
+        - detail_fetched 缺省补 0
+        """
+        params = {}
+        for c in cols:
+            if c == "detail_fetched":
+                params[c] = record.get(c, 0)
+            else:
+                params[c] = record.get(c)  # None when missing
+        return params
 
     def count(self, notice_type: Optional[str] = None) -> int:
         conn = self._get_conn()
