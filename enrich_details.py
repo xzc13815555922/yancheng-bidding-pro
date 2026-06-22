@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # 解析关键字
 # ─────────────────────────────────────────────
 PURCHASER_KEYWORDS = [
+    "采购人信息",   # yancheng_gov: "采购人信息单位名称：XXX"（需放在"采购人"前，避免被"采购人员名单："误匹配）
     "采购人", "采购单位", "发包单位", "发包方", "发包人", "业主单位",
     "建设单位", "项目单位", "招标人", "招标单位", "委托单位",
     "询价人", "委托方",
@@ -69,7 +70,8 @@ EXPECTED_KEYWORDS   = ["预计挂网时间", "预计发布时间", "预计挂网
 WINNER_KEYWORDS     = ["中标单位", "中标供应商", "成交供应商", "中标人",
                        "中标候选人第一名", "中标候选人", "中标侯选人",
                        "中选人", "中选供应商", "成交人"]
-WIN_AMOUNT_KEYWORDS = ["中标金额", "成交金额", "中标价格", "成交价格", "中标价"]
+WIN_AMOUNT_KEYWORDS = ["中标金额", "成交金额", "中标价格", "成交价格", "中标价",
+                       "投标报价金额", "中标报价金额", "成交报价金额", "报价金额"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -109,7 +111,7 @@ _ORG_SUFFIX = (
     r'公司|集团|局|委员会|管委会|政府|中心|学校|医院|协会|基金|银行|事务所|研究院|研究所|大学|学院'
     r'|办事处|街道办|街道|管理处|管理委员会|部门|办公室'
     r'|宣传部|财政局|教育局|卫生局|民政局|住建局|自然资源局'
-    r'|队|所|站|院|厂|场|社|部'
+    r'|队|所|站|院|厂|社|馆'
 )
 _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 
@@ -136,6 +138,9 @@ def _is_valid_purchaser(name: str) -> bool:
     if _CIRCLE_NUM_RE.match(name):
         return False
     if _BAD_PURCHASER_RE.search(name):
+        return False
+    # 含"、"且前后均有2+汉字 → 枚举列表（"沪苏、三龙污水厂"型），不是机构名
+    if re.search(r'[一-鿿]{2,}、[一-鿿]{2,}', name):
         return False
     return True
 
@@ -222,16 +227,18 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
     # 发包单位：关键字后40字内，从chunk头部锚定匹配
     chunk = _extract_after_keyword(text, PURCHASER_KEYWORDS, 40)
     if chunk:
-        # 若chunk内部含有另一个采购人关键字，跳到该关键字之后（处理"书面提出（招标人：XXX）"型模板）
+        # 若chunk内部含有另一个采购人关键字且后接冒号，跳到冒号后（处理"书面提出（招标人：XXX）"型）
+        # 要求：关键字后第一个非空字符必须是冒号，否则是普通句中出现，不跳
         for _inner_kw in PURCHASER_KEYWORDS:
             _kw = re.sub(r'\s+', '', _inner_kw)
             _pos = chunk.find(_kw)
-            if _pos > 1:
-                _after = chunk[_pos + len(_kw):]
-                _after = re.sub(r'^[：:\s\xa0]+', '', _after)
-                if len(_after) >= 4:
-                    chunk = _after
-                    break
+            if 1 < _pos <= 40:
+                _next = chunk[_pos + len(_kw):]
+                if _next and _next[0] in '：:':
+                    _after = re.sub(r'^[：:\s\xa0]+', '', _next)
+                    if len(_after) >= 4:
+                        chunk = _after
+                        break
         chunk = re.sub(r'^[^一-龥a-zA-Z0-9]+', '', chunk)
         # 在chunk中截断至首个中文列表标记（"一、二、1、"等），避免把项目名内容混入
         chunk = re.split(r'[一二三四五六七八九十]\s*[、．.]', chunk)[0]
@@ -275,13 +282,23 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         if not m:
             _t5 = re.sub(r'\s+', ' ', text)
             m = re.search(rf'招标人为([^，。]{{4,40}}(?:{_ORG_SUFFIX}))', _t5)
+        # 格式6: "XXX公司关于…公告/招标" — 自营平台标题/正文主语格式（yueda/dongfang 常见）
+        if not m:
+            m = re.search(rf'([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))关于[^，。]{{2,30}}(?:公告|招标|询价|竞争性)', text)
+        # 格式7: "Copyright…公司名 版权所有" — 自营平台页脚版权行兜底（dongfang/dushi/jscn）
+        if not m:
+            m = re.search(
+                rf'(?:Copyright[^\n]*?|版权所有[：:]\s*)([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))',
+                text, re.IGNORECASE
+            )
         if m:
             val = m.group(1).strip()
             # 剥除序号前缀（"一、XXX" → "XXX"，格式2匹配含序号时需清除）
             val = re.sub(r'^[一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩][、.．]\s*', '', val)
             # 过滤误匹配：政府采购平台名、通用语句片段
             if (_is_valid_purchaser(val) and
-                    not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位"))):
+                    not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位",
+                                               "招投标", "公共资源", "技术支持"))):
                 result["purchaser"] = val
 
     # 清除 "关于" 前缀（如"关于凤依府项目..."被误提取）
@@ -406,6 +423,17 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         winner_val = None
         if chunk:
             chunk = re.sub(r'^[^一-龥a-zA-Z0-9]+', '', chunk)
+            # 若chunk内部含有winner关键字且后接冒号，跳到冒号后（处理"中标人信息：项目名：中标人：公司"）
+            for _inner_kw in WINNER_KEYWORDS:
+                _kw = re.sub(r'\s+', '', _inner_kw)
+                _pos = chunk.find(_kw)
+                if 1 < _pos <= 40:
+                    _next = chunk[_pos + len(_kw):]
+                    if _next and _next[0] in '：:':
+                        _after = re.sub(r'^[：:\s\xa0]+', '', _next)
+                        if len(_after) >= 4:
+                            chunk = _after
+                            break
             chunk = re.sub(r'^(?:为|是|由|系|该|此|因|被)\s*', '', chunk)
             # "第一名：COMPANY" prefix — strip ranking prefix
             chunk = re.sub(r'^第[一二三1-3]名[：:]', '', chunk)
@@ -596,8 +624,13 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
         # ── 特殊站：从 raw_json 提取，无需 HTTP ──
         if site_key == "jszbcg":
             fields = enrich_from_raw_json_jszbcg(raw_json, ntype)
-            # 若 projectCompany 为空且有本地 PDF→MD 缓存，降级用 parse_html_detail 补全 purchaser
-            if not fields.get("purchaser"):
+            # 若关键字段缺失且有本地 PDF→MD 缓存，降级用 parse_html_detail 补全
+            _jszbcg_need_pdf = (
+                not fields.get("purchaser")
+                or (ntype == "award" and not fields.get("winner"))
+                or (ntype in ("tender", "other") and not fields.get("budget"))
+            )
+            if _jszbcg_need_pdf:
                 page_path = row["page_path"] if "page_path" in row.keys() else None
                 if page_path:
                     local_file = Path(page_path)
@@ -605,8 +638,9 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
                         try:
                             text = local_file.read_text(encoding="utf-8")
                             pdf_fields = parse_html_detail(text, ntype)
-                            if pdf_fields.get("purchaser"):
-                                fields["purchaser"] = pdf_fields["purchaser"]
+                            for _k in ("purchaser", "winner", "winning_amount", "budget", "budget_unit", "budget_text"):
+                                if not fields.get(_k) and pdf_fields.get(_k):
+                                    fields[_k] = pdf_fields[_k]
                         except Exception as e:
                             logger.debug(f"  jszbcg PDF→MD fallback failed: {e}")
 
