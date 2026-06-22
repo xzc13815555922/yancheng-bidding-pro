@@ -7,7 +7,7 @@ outputs:
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
-version: v1.8
+version: v1.8.1
 status: 生产可用
 last_run: 2026-06-22
 records: 3860条原始（12站）→ 发包单位=3715 / 预算=1601 / 开标时间=1327 / 中标单位=1269
@@ -209,6 +209,21 @@ python3 enrich_yancheng_gov.py
 验证（修复前 0 条 → 修复后）：chennan 3-4月 19条、kaifaqu 21条、jscn 13条、dongfang 30条
 
 > ⚠️ 注意：上述两个修复已提交但**历史数据（1-4月）尚未回填**，等待拍板后执行 `run_collection.py --days 120` 补跑。
+
+---
+
+## 本轮修复清单（v1.8 → v1.8.1，2026-06-22）
+
+### enrich_details.py purchaser 鲁棒性修复（4项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 59 | `_is_valid_purchaser` 不拦截圈号①②③...（Unicode No 类，不被 `\d` 匹配），导致"③供应商在参加政府..."被误入库 | 新增 `_CIRCLE_NUM_RE`，在 start-char 检查后独立过滤 |
+| 60 | `_BAD_PURCHASER_RE` 漏网：参与/属于/适用政府采购、失信被执行人名单、报名地点/领取地点 | 扩充正则，覆盖更多资格要求片段 |
+| 61 | jszbcg PDF 中"招标人为XXX"无冒号格式，`_extract_after_keyword` 无法匹配；以及格式2/格式5匹配到"一、XXX公司"后含序号前缀被 `_is_valid_purchaser` 拦截 | 新增格式5 fallback（`re.sub(r'\s+', ' ', text)` 跨行合并后匹配"招标人为XXX"）；所有 fallback 匹配结果统一剥除序号前缀 `re.sub(r'^[一二三四五六七八九十①-⑩][、.．]\s*', '', val)` |
+| 62 | jszbcg `enrich_from_raw_json_jszbcg` 仅从 `projectCompany` 取 purchaser，当 API 字段为空且本地 PDF→MD 缓存存在时，无法补全 | `enrich_site('jszbcg')` 中：`projectCompany` 为空时降级读 `page_path` 本地 MD，走 `parse_html_detail` 补全 |
+
+修复后：jszbcg 7条"一、XXX"前缀历史记录全部重新提取，其中6条自动正确，1条（无 page_path）手动写入。
 
 ---
 
