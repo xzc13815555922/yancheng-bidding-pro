@@ -80,9 +80,12 @@ def _ewb_crawl(site_key: str, site_name: str, base_url: str, list_path: str,
             ntype = _infer_type_from_cat(cat2, title)
             items.append((title, href, pub_date, ntype))
 
+        # 修复翻页 bug：区分"页空"和"页有但全过滤空"两种场景
+        # - page_exhausted=True 表示这页有比 start_date 更老的数据（翻过头了）→ break
+        # - 移除原来的 "if not items: break"：避免 page 1 全 > end_date 时立即退出
+        #   （例如回填 1-4 月时 page 1 全是 6 月数据，items 过滤后为空但实际翻到 page 5+ 才有 1-4 月数据）
+        # 外层 for page in range(1, 20) 已限制最大页数
         if not items and page_exhausted:
-            break
-        if not items:
             break
 
         for title, detail_url, pub_date, ntype in items:
