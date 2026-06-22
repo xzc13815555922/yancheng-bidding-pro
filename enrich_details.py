@@ -116,17 +116,24 @@ _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 # 发包单位黑名单：提取结果含这些词则判为误匹配
 _BAD_PURCHASER_RE = re.compile(
     r'满足《|中华人民共和国|政府采购法|申请人|不得参加|资格要求|期间通过|依据《|根据《'
-    r'|报名期间|同一合同|参加政府|具备以下|本次采购依据'
+    r'|报名期间|同一合同|参加政府|参与政府|属于政府|适用政府|具备以下|本次采购依据'
+    r'|重大税收|当事人名单|失信被执行'
+    r'|报名时间[：:]|报名地点|领取地点|现场报名'
     r'|项目名称[：:]|名称[：:][^一-龥]'
 )
+
+# 圈号①②③…⑩ Unicode范围 U+2460-U+2469（Unicode分类No，不被\d匹配，需单独列出）
+_CIRCLE_NUM_RE = re.compile(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]')
 
 
 def _is_valid_purchaser(name: str) -> bool:
     """简单校验提取结果是否像真实机构名，过滤法条/资格要求误匹配。"""
     if not name or len(name) < 4:
         return False
-    # 以编号/括号/数字开头 → 来自列表条款而非机构名
+    # 以编号/括号/数字/圈号开头 → 来自列表条款而非机构名
     if re.match(r'^[(（\d一二三四五六七八九十]', name):
+        return False
+    if _CIRCLE_NUM_RE.match(name):
         return False
     if _BAD_PURCHASER_RE.search(name):
         return False
@@ -264,8 +271,14 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         # 格式4: "XXX公司在...进行采购/通过...方式" — dongfang 首句主语格式
         if not m:
             m = re.search(rf'([^，。\n\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*在[^，。]{{0,20}}(?:项目|工程|服务|采购|询价|通过)', text)
+        # 格式5: "招标人为XXX" 无冒号格式（jszbcg PDF常见，跨行合并后匹配）
+        if not m:
+            _t5 = re.sub(r'\s+', ' ', text)
+            m = re.search(rf'招标人为([^，。]{{4,40}}(?:{_ORG_SUFFIX}))', _t5)
         if m:
             val = m.group(1).strip()
+            # 剥除序号前缀（"一、XXX" → "XXX"，格式2匹配含序号时需清除）
+            val = re.sub(r'^[一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩][、.．]\s*', '', val)
             # 过滤误匹配：政府采购平台名、通用语句片段
             if (_is_valid_purchaser(val) and
                     not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位"))):
@@ -583,6 +596,19 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
         # ── 特殊站：从 raw_json 提取，无需 HTTP ──
         if site_key == "jszbcg":
             fields = enrich_from_raw_json_jszbcg(raw_json, ntype)
+            # 若 projectCompany 为空且有本地 PDF→MD 缓存，降级用 parse_html_detail 补全 purchaser
+            if not fields.get("purchaser"):
+                page_path = row["page_path"] if "page_path" in row.keys() else None
+                if page_path:
+                    local_file = Path(page_path)
+                    if local_file.exists():
+                        try:
+                            text = local_file.read_text(encoding="utf-8")
+                            pdf_fields = parse_html_detail(text, ntype)
+                            if pdf_fields.get("purchaser"):
+                                fields["purchaser"] = pdf_fields["purchaser"]
+                        except Exception as e:
+                            logger.debug(f"  jszbcg PDF→MD fallback failed: {e}")
 
         elif site_key == "sufu":
             fields = enrich_from_raw_json_sufu(raw_json, row)
