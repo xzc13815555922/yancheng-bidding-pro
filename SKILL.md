@@ -7,7 +7,7 @@ outputs:
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
-version: v1.7
+version: v1.8
 status: 生产可用
 last_run: 2026-06-22
 records: 3860条原始（12站）→ 发包单位=3715 / 预算=1601 / 开标时间=1327 / 中标单位=1269
@@ -187,6 +187,28 @@ python3 enrich_yancheng_gov.py
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
 - **std_category 覆盖率 48%**：规则持续扩充中
 - **sufu binding 16 报错**：苏服务API参数偶发，不影响存量数据
+
+---
+
+## 本轮修复清单（v1.7 → v1.8，2026-06-22）
+
+### crawlers/base.py — binding 16/20 错误根治（1项）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 59 | `SiteDB.insert()` 的 UPDATE 两条路径直接将 record dict 传参，当 record 缺少 `page_path`/`pdf_path` 等字段时抛 `sqlite3.ProgrammingError: binding 16`，导致 ycggzy/yancheng_gov/jszbcg 等站回填历史数据时中断 | 新增 `_build_params(record, cols)` helper：从 record 按 cols 列表取值，缺 key 补 None；INSERT + UPDATE 三条路径全部走 helper |
+
+影响站点：ycggzy（政府采购等后段分类）、yancheng_gov（四种 notice_type 全报）、jszbcg（bulletinType 4/6 终止/不招标公示）
+
+### crawlers 翻页 break 逻辑 bug（4站）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 60 | chennan/kaifaqu/jscn/dongfang 四站：翻页时 page 1 数据全 > end_date 被过滤后 items=[]，触发 `if not items: break` 立即退出，导致回填 1-4 月时 0 条（深页数据完全丢失） | 删除 `if not items: break`，只保留 `if not items and page_exhausted: break`（翻过 start_date 才终止）；外层 `for page in range(1, N)` 限制最大页数防死循环 |
+
+验证（修复前 0 条 → 修复后）：chennan 3-4月 19条、kaifaqu 21条、jscn 13条、dongfang 30条
+
+> ⚠️ 注意：上述两个修复已提交但**历史数据（1-4月）尚未回填**，等待拍板后执行 `run_collection.py --days 120` 补跑。
 
 ---
 
