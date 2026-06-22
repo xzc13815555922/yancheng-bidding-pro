@@ -29,7 +29,7 @@ BASE_URL = "https://czj.yancheng.gov.cn"
 # ── 县（市、区）级采购 ───────────────────────────────
 COLUMNS = {
     24547: ("intention",   "采购意向"),
-    20171: ("requirement", "需求公示"),
+    # 20171: ("requirement", "需求公示"),  # 已删除：实际是公开招标公告的跳转页，会重复入库且无开标时间字段
     24549: ("tender",      "单一来源公示"),
     20174: ("tender",      "公开招标公告"),
     20176: ("tender",      "竞争性谈判公告"),
@@ -68,7 +68,7 @@ HEADERS = {
 }
 
 # 这几个栏目列表页标题是占位符，需要进详情页拿
-NEED_DETAIL_TITLE = {20185, 20171, 20137}
+NEED_DETAIL_TITLE = {20185, 20137}
 
 
 class YanchengGovCrawlerPro(BaseCrawler):
