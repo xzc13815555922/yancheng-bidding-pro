@@ -128,6 +128,22 @@ _BAD_PURCHASER_RE = re.compile(
 _CIRCLE_NUM_RE = re.compile(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]')
 
 
+def _clean_purchaser_val(val: str) -> str:
+    """剥除提取结果中常见的前缀/后缀噪声。"""
+    # 【xxx】前缀（来自网站公告标题残留）
+    val = re.sub(r'^【[^】]{2,12}】\s*', '', val)
+    # [上一篇]()[  或 [xxx 导航残留
+    val = re.sub(r'^\[上一篇\]\(\)\[', '', val)
+    val = re.sub(r'^\[(?!一-鿿)', '', val)
+    # 招标人：/ 采购人：/ 单位名称：前缀
+    val = re.sub(r'^(?:招标人|采购人|发包人|单位名称)[：:]\s*', '', val)
+    # 地址：... / 联系人：... 后缀（"蓝色种业黄海实验室地址：盐城市..."）
+    val = re.sub(r'(?:单位)?(?:地址|联系人|联系电话)[：:].*', '', val)
+    # HIS、电子病历... 等系统名后缀（"东台市人民医院HIS、..."）
+    val = re.sub(r'(?:HIS|系统|驻场)[、，。].*', '', val)
+    return val.strip()
+
+
 def _is_valid_purchaser(name: str) -> bool:
     """简单校验提取结果是否像真实机构名，过滤法条/资格要求误匹配。"""
     if not name or len(name) < 4:
@@ -141,6 +157,9 @@ def _is_valid_purchaser(name: str) -> bool:
         return False
     # 含"、"且前后均有2+汉字 → 枚举列表（"沪苏、三龙污水厂"型），不是机构名
     if re.search(r'[一-鿿]{2,}、[一-鿿]{2,}', name):
+        return False
+    # 中标候选人/中标结果/中标公示等前缀 → 提取失误，取的是winner段落
+    if re.match(r'^中标(?:候选人|结果|公示|公告)', name):
         return False
     return True
 
@@ -255,6 +274,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         m = re.match(rf'.{{2,35}}?(?:{_ORG_SUFFIX})', chunk)
         if m:
             val = m.group(0).strip()
+            val = _clean_purchaser_val(val)
             if 4 < len(val) < 45 and _is_valid_purchaser(val):
                 result["purchaser"] = val
 
@@ -295,6 +315,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             val = m.group(1).strip()
             # 剥除序号前缀（"一、XXX" → "XXX"，格式2匹配含序号时需清除）
             val = re.sub(r'^[一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩][、.．]\s*', '', val)
+            val = _clean_purchaser_val(val)
             # 过滤误匹配：政府采购平台名、通用语句片段
             if (_is_valid_purchaser(val) and
                     not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位",
