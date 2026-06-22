@@ -18,7 +18,7 @@ records: 3920条原始（12站）→ 发包单位=3130 / 预算=1538 / 中标单
 
 采集盐城市 12 个站点的招标/中标/采购意向公告，富化详情页字段，输出 unified.db 三张归一化表 + Excel。
 
-**覆盖站点**：jszbcg（江苏招标采购服务平台）、yancheng_gov、ycggzy、sufu、yueda、dushi、jscn、chennan、dongfang、bigdata、jingkai、kaifaqu
+**覆盖站点**：jszbcg（江苏招标采购服务平台）、yancheng_gov（盐城市政府采购网）、ycggzy（盐城市公共资源交易平台）、sufu（苏服务）、yueda（悦达集团阳光采购平台）、dushi（盐城市都市建设投资集团有限公司）、jscn（江苏世纪新城投资控股集团有限公司）、chennan（江苏省盐南高新区公共资源交易电子化服务平台）、dongfang（盐东方产业投资集团有限公司）、bigdata（盐城市大数据集团）、jingkai（盐城经开城市发展投资集团有限公司）、kaifaqu（盐城经济技术开发区行政审批局公共资源交易服务平台）
 
 ## 本地缓存架构（v1.4）
 
@@ -178,6 +178,22 @@ python3 enrich_yancheng_gov.py
 | 34 | 电梯年度检验/维护未归类（"检验"非"检测"，词不连续）| `add_std_category.py` 电梯服务加入"电梯检验"/"电梯年检"/"电梯年度检验"/"电梯维护" |
 | 35 | std_category 覆盖率 45%→47% | 合计新增覆盖8条，1844/3920 |
 | 36 | 月报格式重构 | `generate_tender_report.py`：汇总表合并今日/前日列、新增当月已分类列；明细页去掉网站列加发布日期列、展示未分类（潜在商机）项目；汇总表下方加分类说明 |
+
+## 本轮修复清单（v1.6 → v1.6.1，2026-06-22）
+
+| # | 问题 | 修复位置 |
+|---|------|---------|
+| 37 | yancheng_gov columnid=20171 实际是公开招标公告的精简跳转页，与 20174/20176/... 重复入库 66 条，且 open_date 全空（无开标时间字段）。make_id 去重未生效（两条 URL 标题不完全一致） | `crawlers/yancheng_gov.py` 删除 `COLUMNS[20171]` 和 `NEED_DETAIL_TITLE` 里的 `20171`，从源头不再采集 |
+| 38 | unified.db.tender + yancheng_gov.db.notices 残留 66 条历史脏数据 | 新增 `cleanup_art_20171_dupes.py`，默认 dry-run，加 `--confirm` 真删并自动备份到 `data/backup/<日期>/<时间戳>/` |
+
+跑法：
+```bash
+# 干跑（无改动）
+python3 cleanup_art_20171_dupes.py
+
+# 真删（先备份再删）
+python3 cleanup_art_20171_dupes.py --confirm
+```
 
 ## 本轮修复清单（v1.4 → v1.5，2026-06-21）
 
