@@ -21,6 +21,16 @@ from base import BaseCrawler, make_id
 
 logger = logging.getLogger(__name__)
 
+# PaddleOCR singleton — 避免每次 _pdf_to_md 调用都重新初始化5个模型（会慢10~20s/条）
+_OCR_INSTANCE = None
+
+def _get_ocr():
+    global _OCR_INSTANCE
+    if _OCR_INSTANCE is None:
+        from paddleocr import PaddleOCR
+        _OCR_INSTANCE = PaddleOCR(use_angle_cls=True, lang="ch")
+    return _OCR_INSTANCE
+
 os.environ.setdefault("NO_PROXY", "*")
 os.environ.setdefault("no_proxy", "*")
 
@@ -188,11 +198,10 @@ class JSZbcgCrawlerPro(BaseCrawler):
             pass
 
         if len(text.strip()) < 100:
-            # 图片型 PDF → PaddleOCR
+            # 图片型 PDF → PaddleOCR（singleton，避免每次重新加载5个模型）
             try:
                 import fitz, tempfile, os as _os
-                from paddleocr import PaddleOCR
-                ocr = PaddleOCR(use_angle_cls=True, lang="ch")
+                ocr = _get_ocr()
                 doc = fitz.open(pdf_path)
                 lines = []
                 for page in doc:

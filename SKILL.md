@@ -7,10 +7,10 @@ outputs:
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
-version: v1.9
+version: v2.0
 status: 生产可用
-last_run: 2026-06-22
-records: 3860条原始（12站）→ 招标公告2593/中标3527/意向961；发包方缺口 tender10%/award6%/intention2%
+last_run: 2026-06-23
+records: 11825条原始（12站）→ unified.db 招标公告3714/中标3634/意向974；发包方缺口 tender12%/award8%/intention2%
 ---
 
 # 全域招标信息采集 Pro
@@ -127,53 +127,52 @@ python3 enrich_yancheng_gov.py
 | `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
 | `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
-## 数据质量现状（2026-06-22）
+## 数据质量现状（2026-06-23）
 
-### 全站汇总（3860条原始）
+### unified.db 三表
 
-| 字段         | 填充数  | 填充率 |
-|------------|--------|------|
-| purchaser  | 3715   | 96%  |
-| budget     | 1601   | 41%  |
-| open_date  | 1327   | 34%  |
-| winner     | 1269   | 33%  |
-| std_district | ~98% | add_std_district.py |
-| std_category | 48%  | 规则持续扩充 |
+| 表       | 总条数 | 发包方   | 金额字段  | 开标时间  |
+|---------|------|--------|--------|--------|
+| tender  | 3714 | 3281 (88%) | budget 2904 (78%) | 3333 (90%) |
+| award   | 3634 | 3334 (92%) | winning_amount 2696 (74%) | — |
+| intention | 974 | 955 (98%) | budget 520 (53%) | — |
 
-### 各站概况
+### 各站概况（unified.db 视角，跨站去重后）
 
-| 站点           | 条数   | 发包单位 | 预算 | 开标时间 | 中标单位 |
-|--------------|------|--------|-----|--------|--------|
-| jszbcg       | 1308 | 1290   | 484 | 571    | 571    |
-| yancheng_gov | 790  | 774    | 264 | 195    | 143    |
-| ycggzy       | 1289 | 1207   | 567 | 344    | 484    |
-| sufu         | 195  | 195    | 195 | 47     | 0      |
-| yueda        | 84   | 77     | 3   | 51     | 23     |
-| dongfang     | 44   | 36     | 19  | 24     | 11     |
-| jscn         | 41   | 38     | 17  | 24     | 12     |
-| dushi        | 35   | 27     | 17  | 31     | 10     |
-| chennan      | 31   | 29     | 17  | 19     | 8      |
-| kaifaqu      | 30   | 30     | 12  | 15     | 2      |
-| bigdata      | 10   | 10     | 5   | 5      | 4      |
-| jingkai      | 3    | 2      | 1   | 1      | 1      |
+| 站点           | 条数   | 发包单位 | 预算/金额 | 开标时间 | 中标单位 |
+|--------------|------|--------|---------|--------|--------|
+| jszbcg       | 3549 | 3186   | 2849    | 1842   | 1652   |
+| ycggzy       | 2012 | 1725   | 1605    | 357    | 830    |
+| yancheng_gov | 1665 | 1597   | 913     | 575    | 539    |
+| dushi        | 222  | 210    | 153     | 96     | 65     |
+| chennan      | 183  | 183    | 153     | 93     | 87     |
+| sufu         | 169  | 169    | 169     | 47     | 0      |
+| jscn         | 158  | 152    | 99      | 87     | 57     |
+| dongfang     | 134  | 125    | 94      | 90     | 36     |
+| yueda        | 113  | 111    | 5       | 72     | 30     |
+| kaifaqu      | 62   | 57     | 39      | 46     | 2      |
+| jingkai      | 35   | 35     | 22      | 18     | 15     |
+| bigdata      | 20   | 20     | 19      | 10     | 10     |
+
+> jszbcg tender 已完整覆盖 2026-01-04 至今（v2.0 历史补采后）
 
 ### 本地缓存覆盖
 
 | 类型 | 数量 | 路径 |
 |-----|------|------|
-| HTML 详情页 MD | ~1130 个 | `data/pages/{site}/` |
-| jszbcg PDF | ~1300 个（616MB） | `data/pdfs/jszbcg/` |
+| HTML 详情页 MD | ~1400 个 | `data/pages/{site}/` |
+| jszbcg PDF | ~1800 个 | `data/pdfs/jszbcg/` |
 
 ## 系统不变量（verify_quality.py 自动校验）
 
 | 不变量 | 当前值 | 说明 |
 |--------|-------|------|
-| jszbcg 记录数 ≥ 1300 | 1308 | 采集范围退化则告警 |
-| yancheng_gov 记录数 ≥ 850 | 790 | art_20171 清理后正常下降 |
-| ycggzy 记录数 ≥ 1280 | 1289 | — |
-| sufu purchaser 填充率 ≥ 99% | 100% | 纯 API，无理由低于此 |
-| jszbcg purchaser 填充率 ≥ 95% | ~98.6% | tenderName API 回填 |
-| unified tender/award 各 ≥ 1200 | 1226/1234 | — |
+| jszbcg 记录数 ≥ 3500 | 3549 | 历史补采后覆盖全年 |
+| yancheng_gov 记录数 ≥ 1600 | 1665 | — |
+| ycggzy 记录数 ≥ 1900 | 2012 | — |
+| sufu purchaser 填充率 ≥ 99% | 100% | 纯 API |
+| unified tender ≥ 3500 | 3714 | — |
+| unified award ≥ 3500 | 3634 | — |
 
 ## 已知结构性限制
 
@@ -181,12 +180,44 @@ python3 enrich_yancheng_gov.py
 - **yueda 预算 97% 空**：网站公告页本身不披露预算金额
 - **ycggzy purchaser** 来自列表API（`reenrich_ycggzy.py`），不走 `enrich_details.py`
 
-## 已知遗留问题（待决策）
+## 已知遗留问题
 
-- **yancheng_gov 10组重复记录**：同名同日期不同 art_id，疑似多标包；is_duplicate 未标记
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
-- **std_category 覆盖率 48%**：规则持续扩充中
-- **sufu binding 16 报错**：苏服务API参数偶发，不影响存量数据
+- **std_category 覆盖率 42%**：规则持续扩充中，bigdata/jingkai/jscn 历史数据完善后可提升
+- **ycggzy purchaser 结构性缺口 ~200条**：SPA API，部分记录无法回填
+- **yueda/sufu 金额字段 0 填充**：平台不披露/需登录
+
+---
+
+## 本轮修复清单（v1.9 → v2.0，2026-06-23）
+
+### purchaser 全面清洗（155条）
+
+| # | 问题类型 | 数量 | 修复方式 |
+|---|---------|-----|--------|
+| 72 | jszbcg award `中标候选人（XXX）` 误入 purchaser（winner 段落被抓为发包方） | 79 | NULL + 修复根因 |
+| 73 | jszbcg `【招标公告/中标结果/暂停/流标公告】XXX` 标题前缀残留 | 16 | 剥前缀 |
+| 74 | jszbcg/yancheng_gov `单位名称：/招标人：/采购人：` 冗余前缀 | 21 | 剥前缀 |
+| 75 | jszbcg/yancheng_gov `XXX地址：.../联系人：...` 后缀描述混入 | 14 | 截断地址后缀 |
+| 76 | jscn `[上一篇]()[XXX]` 导航残留 | 4 | 剥前缀 |
+| 77 | dushi/yancheng_gov/ycggzy 纯描述段落/垃圾文本 | 21 | NULL |
+
+**新增函数**：`_clean_purchaser_val(val)` — 统一剥除 `【xxx】`、`招标人：`、`地址：...`、`联系人：...` 等前后缀噪声，在 `_is_valid_purchaser` 校验前调用。
+
+**新增拒绝规则**：`_is_valid_purchaser` 增加 `^中标(?:候选人|结果|公示|公告)` 前缀拒绝，防止 winner 段落误入 purchaser。
+
+### jszbcg OCR singleton 优化
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 78 | `_pdf_to_md` 每次调用新建 `PaddleOCR()` 实例，加载5个 PaddleX 模型（~10-20s/次），批量处理1000+条时耗时数小时 | `crawlers/jszbcg.py` 新增模块级 `_OCR_INSTANCE` + `_get_ocr()` singleton 函数，全批次只初始化一次 |
+
+### 历史数据回填
+
+| # | 站点 | 操作 | 新增记录 |
+|---|------|------|--------|
+| 79 | jszbcg tender | 补采 2026-01-04~04-19（原始 tender 仅从 04-20 开始） | +1065条，现覆盖 2026-01-04 至今 |
+| 80 | chennan/kaifaqu/jscn/dongfang | 翻页 bug 修复后历史重采（2026-01-04~06-19） | ~42条 |
 
 ---
 
