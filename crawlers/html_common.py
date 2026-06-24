@@ -57,7 +57,7 @@ def save_page_md(html: str, url: str, site_key: str, title: str) -> str:
 
 
 def infer_notice_type(text: str) -> str:
-    if any(k in text for k in ("中标", "成交", "候选", "结果公告", "合同", "中选")):
+    if any(k in text for k in ("中标", "成交", "候选", "结果公告", "结果公示", "评审结果", "合同", "中选")):
         return "award"
     if any(k in text for k in ("采购意向", "意向公告", "预算公告")):
         return "intention"
