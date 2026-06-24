@@ -7,10 +7,10 @@ outputs:
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
-version: v2.0
+version: v2.1
 status: 生产可用
-last_run: 2026-06-23
-records: 11825条原始（12站）→ unified.db 招标公告3714/中标3634/意向974；发包方缺口 tender12%/award8%/intention2%
+last_run: 2026-06-24
+records: 11825条原始（12站）→ unified.db 招标公告3674/中标3694/意向974；发包方缺口 tender12%/award8%/intention2%
 ---
 
 # 全域招标信息采集 Pro
@@ -186,6 +186,26 @@ python3 enrich_yancheng_gov.py
 - **std_category 覆盖率 42%**：规则持续扩充中，bigdata/jingkai/jscn 历史数据完善后可提升
 - **ycggzy purchaser 结构性缺口 ~200条**：SPA API，部分记录无法回填
 - **yueda/sufu 金额字段 0 填充**：平台不披露/需登录
+
+---
+
+## 本轮修复清单（v2.0 → v2.1，2026-06-24）
+
+### notice_type 误分类修正（51条）
+
+| # | 问题 | 站点 | 数量 | 修复 |
+|---|------|------|-----|------|
+| 81 | "评审结果公示"/"询价结果公示" 被 `infer_notice_type` 默认归 tender | yueda（pfwgg/phwgg/pgcgg 路径）| 33 | `html_common.py` 加"结果公示"/"评审结果"关键词 → award |
+| 82 | 同上 | dushi | 18 | 批量 UPDATE notice_type='award' |
+
+unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去重变动）
+
+### purchaser 提取修正（dushi 2441号）
+
+| # | 问题 | 修复 |
+|---|------|------|
+| 83 | `格式8（因COMPANY经营需要）` 置于格式3之后，格式3从标题行抢先匹配"关于都市服务子公司" | 格式8移至兜底链最前 |
+| 84 | `_parse_amount` 被"单价65元/月/台"抢先，总计32760未采集 | 开头加"总计XXX元"优先匹配 |
 
 ---
 
