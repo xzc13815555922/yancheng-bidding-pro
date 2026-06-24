@@ -185,6 +185,13 @@ def _parse_amount(raw: str) -> Tuple[Optional[float], str]:
     if not raw:
         return None, "UNKNOWN"
     raw = raw.replace(",", "").replace("，", "")
+    # 优先匹配"总计XXX元"（避免被"单价X元/月/台"抢先）
+    m_total = re.search(r'总计\s*([\d.]+)\s*(亿|万元|万|元)', raw)
+    if m_total:
+        num, unit = float(m_total.group(1)), m_total.group(2)
+        if unit == "亿": return num * 1e8, "亿"
+        if unit in ("万元", "万"): return num * 1e4, "元"
+        return num, "元"
     # 带单位的数字
     m = re.search(r'([\d.]+)\s*(亿|万元|万|元|RMB)', raw)
     if m:
@@ -280,12 +287,18 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
 
     # 敘事句兜底：无标签页面的几种常见格式
     if "purchaser" not in result:
-        # 格式1: 「因经营需要，XX公司需对/拟对...」
+        # 格式8: "因COMPANY经营/业务/发展需要" — dushi/jscn 询价公告首句，排最前避免被格式3标题行误匹配
         m = re.search(
-            rf'(?:因[经业]营需要[，,]|因工作需要[，,]|为[满完]足[^，。]{{0,10}}[，,])'
-            rf'([^，。\s]{{4,35}}(?:{_ORG_SUFFIX}))[^，。]{{0,8}}(?:需|拟|将|决|计划)',
+            rf'因([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))(?:[经业]营|工作|发展)需要',
             text
         )
+        # 格式1: 「因经营需要，XX公司需对/拟对...」
+        if not m:
+            m = re.search(
+                rf'(?:因[经业]营需要[，,]|因工作需要[，,]|为[满完]足[^，。]{{0,10}}[，,])'
+                rf'([^，。\s]{{4,35}}(?:{_ORG_SUFFIX}))[^，。]{{0,8}}(?:需|拟|将|决|计划)',
+                text
+            )
         # 格式2: 「XX公司负责实施/决定/现对...」
         if not m:
             m = re.search(
