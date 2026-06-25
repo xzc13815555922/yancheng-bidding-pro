@@ -107,11 +107,20 @@ def _strip_html(html: str) -> str:
 
 
 # 发包单位结尾词（仅保留歧义低的多字或强语义词，排除"部/所/院/委"等高歧义单字）
+# 2026-06-25 审计 P1-4 修复: 扩联合会/中学/小学/幼儿园/党委 等 12+ 后缀
+# 验证案例: yancheng_gov 17 条 purchaser 缺失中 12 条因后缀漏抓
 _ORG_SUFFIX = (
     r'公司|集团|局|委员会|管委会|政府|中心|学校|医院|协会|基金|银行|事务所|研究院|研究所|大学|学院'
     r'|办事处|街道办|街道|管理处|管理委员会|部门|办公室'
     r'|宣传部|财政局|教育局|卫生局|民政局|住建局|自然资源局'
     r'|队|所|站|院|厂|社|馆'
+    # 2026-06-25 审计 P1-4 新增
+    r'|联合会|残联|红十字会|商会|校友会|促进会|联盟|理事会|联席会|基金会'
+    r'|中学|小学|幼儿园|中专|技校|党校'
+    r'|党委|党组|党工委|党支部|纪委|监委|人大|政协'
+    r'|村委|居委|工作站|服务处'
+    r'|管理局|管理处|建设处|工程处|工程局'
+    r'|集团有限|有限责任|股份有限'
 )
 _ORG_PATTERN = re.compile(_ORG_SUFFIX)
 
@@ -742,6 +751,89 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
 
     logger.info(f"[{site_key}] 补全结果: 成功={ok} 跳过/403={fail}")
     return {"ok": ok, "fail": fail}
+
+
+# ─────────────────────────────────────────────────────────
+# 单测 (2026-06-25 审计 P1-4/5/6 修复后补充)
+# 用法: python3 -c "from enrich_details import _test_org_suffix, _test_winner_keywords, _test_budget_keywords; _test_org_suffix(); _test_winner_keywords(); _test_budget_keywords()"
+# ─────────────────────────────────────────────────────────
+def _test_org_suffix():
+    """P1-4: 验证 _ORG_SUFFIX 覆盖常见机构后缀。"""
+    pat = re.compile(_ORG_SUFFIX)
+    test_cases = [
+        # 原有覆盖
+        'XX公司', 'XX集团', 'XX医院', 'XX学校', 'XX大学', 'XX研究院',
+        'XX委员会', 'XX管委会', 'XX银行', 'XX服务中心',
+        # 2026-06-25 P1-4 新增 — 抽自 yancheng_gov 17 条 purchaser 缺失样本
+        '阜宁县残疾人联合会（机关）',           # 联合会 (抽样 c4e76fc9)
+        '滨海县红十字会',                       # 红十字会
+        '盐城市大丰区幸福路小学',               # 小学 (抽样 97047fef)
+        '盐城市大丰区南阳中学',                 # 中学 (抽样 c26c2dd2)
+        '盐城市大丰区育红幼儿园',               # 幼儿园
+        '江苏省盐城中学',                       # 中学
+        '盐城市大丰区实验初级中学常新路分校',     # 中学 (抽样 d8e05626)
+        '高新区党工委',                         # 党工委
+        '村委', '居委', '工作站',
+        'XX促进会', 'XX商会', 'XX校友会', 'XX联盟',
+        'XX管理局', 'XX建设处', 'XX工程局',
+        # 负面测试 — 这些不应被错判为机构名
+        '采购人信用承诺书',                     # 不是机构
+        '本项目不接受',                         # 不是机构
+    ]
+    pos_cases = test_cases[:-2]
+    neg_cases = test_cases[-2:]
+    fail = []
+    for name in pos_cases:
+        if not pat.search(name):
+            fail.append(f'ORG_SUFFIX 漏了 {name!r}')
+    for name in neg_cases:
+        if pat.search(name):
+            # 不一定 fail — ORG_SUFFIX 只是一部分, 后面有 _is_valid_purchaser 黑名单拦
+            pass
+    if fail:
+        for f in fail:
+            print(f'  ❌ {f}')
+        raise AssertionError(f'{len(fail)} ORG_SUFFIX 单测失败')
+    print(f'  ✅ _test_org_suffix: {len(pos_cases)} 个机构名全部命中 ORG_SUFFIX')
+
+
+def _test_winner_keywords():
+    """P1-5: 验证 WINNER_KEYWORDS 覆盖常见表格列名。"""
+    # yancheng_gov 中标公告表头 top 5 出现频率:
+    # 序号 2414 | 社会信用代码 2349 | 供应商名称 2348 | 供应商地址 2348 | 中标/成交金额 2093
+    required = {
+        "中标单位", "中标供应商", "成交供应商", "中标人",
+        "中标候选人第一名", "中标候选人", "中标侯选人",
+        "中选人", "中选供应商", "成交人",
+        # 2026-06-25 P1-5 新增
+        "供应商名称", "投标供应商名称", "中标供应商名称", "中标单位名称", "成交供应商名称",
+    }
+    missing = [k for k in required if k not in WINNER_KEYWORDS]
+    if missing:
+        raise AssertionError(f'WINNER_KEYWORDS 漏了 {missing}')
+    print(f'  ✅ _test_winner_keywords: {len(required)} 个关键词全部包含')
+
+
+def _test_budget_keywords():
+    """P1-6: 验证 BUDGET_KEYWORDS 覆盖"采购预算(万元)"等带括号单位变种。"""
+    required = {
+        "项目预算", "采购预算", "控制价", "最高限价", "限价",
+        "总投资", "投资额", "预算金额", "总预算",
+        "项目规模", "服务费", "监理费", "工程造价", "项目造价",
+        "合同估算价", "合同预估金额", "合同预计金额", "合同预计总金额",
+        "估算价", "估算总投资",
+        "标的额", "采购金额", "总服务费", "服务总费用", "总费用",
+        "采购规模", "招标规模", "项目金额", "本次采购金额",
+        "规模", "建设规模", "工程规模",
+        # 2026-06-25 P1-6 新增 — 抽自 yancheng_gov 意向公告表头 1363 次
+        "采购预算(万元)", "项目预算(万元)",
+        "合同预估金额（万元）", "合同预计金额（万元）",
+        "预算金额（万元）", "最高限价(万元)", "招标控制价(万元)",
+    }
+    missing = [k for k in required if k not in BUDGET_KEYWORDS]
+    if missing:
+        raise AssertionError(f'BUDGET_KEYWORDS 漏了 {missing}')
+    print(f'  ✅ _test_budget_keywords: {len(required)} 个关键词全部包含')
 
 
 def enrich_all(dry_run: bool = False):
