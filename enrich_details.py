@@ -193,6 +193,9 @@ def _is_valid_purchaser(name: str) -> bool:
     # 中标候选人/中标结果/中标公示等前缀 → 提取失误，取的是winner段落
     if re.match(r'^中标(?:候选人|结果|公示|公告)', name):
         return False
+    # 含年月日批次词 → 来自公告标题而非机构名（"XX局2026年6月(第1批)政府"型）
+    if re.search(r'\d{4}年\d{1,2}月', name):
+        return False
     return True
 
 
@@ -367,6 +370,19 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                                                "招投标", "公共资源", "技术支持"))):
                 result["purchaser"] = val
 
+    # 格式9（独立兜底）: 文档末尾签署机构 "XXX局\n2026年06月24日" — yancheng_gov 意向公告常见
+    # 必须在其他格式之后独立执行，避免被 Format3 坏值拦截
+    if "purchaser" not in result:
+        # 用"打印此页"锚定文档尾部，避免误匹配正文中的"XXX 2026年XX月XX日"
+        m9 = re.search(
+            r'([^，。\s]{4,30})\s+\d{4}年\d{1,2}月\d{1,2}日\s*打印此页',
+            text
+        )
+        if m9:
+            val9 = _clean_purchaser_val(m9.group(1).strip())
+            if _is_valid_purchaser(val9):
+                result["purchaser"] = val9
+
     # 清除 "关于" 前缀（如"关于凤依府项目..."被误提取）
     if result.get("purchaser", "").startswith("关于"):
         result["purchaser"] = result["purchaser"][2:].lstrip()
@@ -420,6 +436,19 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             result["budget_unit"] = unit
             result["budget_text"] = chunk[:40]
             break
+
+    # 意向公告表格兜底：预算列是纯数字（单位在列头"万元"），格式 |<数字>|YYYY-MM|
+    # 列头与数据之间隔多列，30字窗口无法覆盖，需独立提取
+    if "budget" not in result and notice_type == "intention":
+        _tn = re.sub(r'\s+', '', text)
+        _budget_cells = re.findall(r'\|(\d+(?:\.\d+)?)\|20\d{2}[-年]\d{2}', _tn)
+        _budget_vals = [float(n) for n in _budget_cells if float(n) >= 5]  # 过滤行号（<5万不合理）
+        if _budget_vals:
+            _total = sum(_budget_vals) * 1e4
+            if 100 <= _total <= 5e10:
+                result["budget"] = _total
+                result["budget_unit"] = "元"
+                result["budget_text"] = "+".join(_budget_cells[:3]) + "万元"
 
     # budget inline fallback：句中直接出现金额表达式（无需关键词触发）
     if "budget" not in result:
@@ -757,6 +786,9 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
                         status = 2
                     elif resp.status_code == 200:
                         enc = resp.apparent_encoding or "utf-8"
+                        # chardet 对中文政府网页常误判为 Latin-1，强制 UTF-8
+                        if enc.lower() in ("iso-8859-1", "windows-1252", "ascii", "latin-1", "iso8859-1"):
+                            enc = "utf-8"
                         try:
                             html = resp.content.decode(enc, errors="replace")
                         except Exception:
