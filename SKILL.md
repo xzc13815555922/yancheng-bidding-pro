@@ -8,12 +8,12 @@ outputs:
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
   - pdf     # output/运营商综合月报_YYYYMM.pdf（三源合并：ybp+tyc+obm）
-version: v2.3
+version: v2.4
 status: 生产可用
 last_run: 2026-06-25
-records: 12120条原始（12站）→ unified.db 招标公告3721/中标3804/意向992；发包方缺口 tender12%/award8%/intention2%
+records: 12225条原始（12站）→ unified.db 招标公告3728/中标3857/意向993；发包方缺口 tender10%/award8%/intention2%
 
-> **v2.3 变更（2026-06-25）**：① 05:00 cron 改为 bash exec 模式（修 stall timeout）② 天眼查 `--days 1` 优化（45min → 4min）③ 取消 Excel 推送（SKILL/脚本/cron 三处同步）。详见末尾「本轮修复清单（v2.2 → v2.3）」。
+> **v2.4 变更（2026-06-25）**：P0+P1 全站字段质量修复：① jszbcg budget 文件工本费/单价误提取清除（14条）② jszbcg winner "详见公告内容"伪值清除（19条）③ ycggzy purchaser HTML实体去除（&nbsp;）④ 加"自筹资金/财政资金"关键词 jszbcg tender budget 78%→85% ⑤ ycggzy raw_json CDATA修复新增1390条MD文件 ⑥ yueda winner候选人格式 46%→94%。详见末尾「本轮修复清单（v2.3 → v2.4）」。
 ---
 
 # 全域招标信息采集 Pro
@@ -149,32 +149,26 @@ python3 enrich_yancheng_gov.py
 | `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
 | `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
-## 数据质量现状（2026-06-25）
+## 数据质量现状（2026-06-25 v2.4）
 
 ### unified.db 三表
 
 | 表       | 总条数 | 发包方   | 金额字段  | 开标时间  |
 |---------|------|--------|--------|--------|
-| tender  | 3721 | ~88% | budget ~78% | ~90% |
-| award   | 3804 | ~92% | winning_amount ~74% | — |
-| intention | 992 | ~98% | budget ~53% | — |
+| tender  | 3728 | ~90% | budget ~85%(jszbcg) | ~90% |
+| award   | 3857 | ~92% | winning_amount ~74% | — |
+| intention | 993 | ~99% | budget ~95% | — |
 
-### 各站原始记录数（截至 2026-06-25）
+### 各站关键字段覆盖率（v2.4）
 
-| 站点           | 原始记录 |
-|--------------|--------|
-| jszbcg       | 4140   |
-| ycggzy       | 4050   |
-| yancheng_gov | 2589   |
-| sufu         | 357    |
-| chennan      | 205    |
-| dushi        | 223    |
-| jscn         | 163    |
-| dongfang     | 135    |
-| yueda        | 119    |
-| kaifaqu      | 84     |
-| jingkai      | 35     |
-| bigdata      | 20     |
+| 站点 | 原始记录 | purchaser | budget | winner | page_path |
+|------|---------|-----------|--------|--------|-----------|
+| jszbcg | 4157 | 90% | 38% | 40% | 92% |
+| yancheng_gov | 2596 | 98% | 44% | 21% | 100% |
+| ycggzy | 4050 | 92% | 43% | 33% | **45%**（修复CDATA后↑） |
+| sufu | 437 | 100% | 100% | 0% | 100% |
+| yueda | 119 | 98% | 4% | **53%**（候选人格式修复后↑） | 99% |
+| 其他7站 | ~850 | 93-100% | 37-75% | 2-50% | 98-100% |
 
 > jszbcg 已覆盖 2026-01-04 至今全年历史
 
@@ -182,7 +176,7 @@ python3 enrich_yancheng_gov.py
 
 | 类型 | 数量 | 路径 |
 |-----|------|------|
-| HTML 详情页 MD | ~1400 个 | `data/pages/{site}/` |
+| HTML/ycggzy 详情页 MD | ~2900 个 | `data/pages/{site}/` |
 | jszbcg PDF | ~1800 个 | `data/pdfs/jszbcg/` |
 
 ## 系统不变量（verify_quality.py 自动校验）
@@ -198,16 +192,37 @@ python3 enrich_yancheng_gov.py
 
 ## 已知结构性限制
 
-- **sufu 中标人 100% 空**：列表API不含，详情API需登录，无法修复
-- **yueda 预算 97% 空**：网站公告页本身不披露预算金额
-- **ycggzy purchaser** 来自列表API（`reenrich_ycggzy.py`），不走 `enrich_details.py`
+- **sufu 中标人 0%**：award 详情页为 JS SPA（js.fwgov.cn），静态抓取只返回空壳
+- **yueda 预算 4%**：网站公告页本身不披露预算金额
+- **yancheng_gov award winning_amount 44%**：框架协议类使用"优惠率"而非固定金额，无从提取
+- **ycggzy 合同类记录无 page（2196条）**：raw_json.content 为空，ycggzy API 对合同履行类不返回 HTML
 
 ## 已知遗留问题
 
 - **采购意向 expected_list（预计挂网时间）100% 空**：字段存在但未解析
-- **std_category 覆盖率 42%**：规则持续扩充中，bigdata/jingkai/jscn 历史数据完善后可提升
-- **ycggzy purchaser 结构性缺口 ~200条**：SPA API，部分记录无法回填
-- **yueda/sufu 金额字段 0 填充**：平台不披露/需登录
+- **std_category 覆盖率 ~42%**：规则持续扩充中
+- **ycggzy purchaser 结构性缺口 ~300条**：SPA API，部分记录无法回填
+- **yueda winner "项目名:公司名"格式**：部分候选人公示 winner 字段含项目名前缀，可后处理但优先级低
+
+---
+
+## 本轮修复清单（v2.3 → v2.4，2026-06-25）
+
+### P0 数据误提取清除
+
+| # | 站点 | 字段 | 问题 | 修复 | 数量 |
+|---|------|------|------|------|------|
+| 92 | jszbcg | budget | 文件工本费/单价（"/吨"/"/套"/"售后不退"）误作项目预算 | chunk 含上述词则 skip | 14条 |
+| 93 | jszbcg | winner | "详见公告内容其他类型投标报价：..." 伪中标人 | 提取前检查 + SQL 清除 | 19条 |
+| 94 | ycggzy | purchaser | `&nbsp;` HTML 实体残留 | `_clean_purchaser_val` 加 `html.unescape` | 9条 |
+
+### P1 覆盖率提升
+
+| # | 站点 | 字段 | 根因 | 修复 | 效果 |
+|---|------|------|------|------|------|
+| 95 | jszbcg | budget(tender) | jszbcg 固定格式"自筹资金/财政资金：XX万元"不在 BUDGET_KEYWORDS | 加入"自筹资金""财政资金""财政性资金" | 78%→**85%** |
+| 96 | ycggzy | page_path(award/tender/other) | raw_json.content 被 `<![CDATA[...]]>` 包装，html2text 解析返回空 | `download_ycggzy` 剥除 CDATA 包装；设置后同步 `detail_fetched=0` | 新增**1390条** MD |
+| 97 | yueda | winner(award) | "中标候选人名单 第一名：XXX"格式因"名单 第1名"超 5 字 colon 窗口而失配 | 独立 `m_cand` 正则 | 46%→**94%** |
 
 ---
 
