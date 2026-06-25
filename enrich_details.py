@@ -76,7 +76,14 @@ BUDGET_EXCLUDE = ["保证金", "履约金", "押金", "违约金",
                  "手续费", "公证费", "审计费", "律师费", "鉴证费",
                  "招标服务费", "招标代理服务费", "采购代理服务费",
                  "交易服务费", "平台服务费"]
-OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期", "开启时间"]
+OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期", "开启时间",
+                      # 2026-06-25 审计 P2-1 新增 — 合并标题格式
+                      # yancheng_gov 招标公告表头常见: "截止时间、开标时间和地点"
+                      "截止时间、开标时间和地点",
+                      "递交截止时间、开标时间",
+                      "投标截止时间、开标时间",
+                      "文件开启时间",
+                      "开启日期"]
 DEADLINE_KEYWORDS   = ["报名截止", "投标截止", "截标时间", "递交截止", "报名截止时间", "截止时间"]
 EXPECTED_KEYWORDS   = ["预计挂网时间", "预计发布时间", "预计挂网日期", "预计公告时间"]
 WINNER_KEYWORDS     = ["中标单位", "中标供应商", "成交供应商", "中标人",
@@ -897,6 +904,28 @@ def _test_budget_exclude():
         if hit != should_exclude:
             raise AssertionError(f'BUDGET_EXCLUDE 逻辑错误: {text!r} hit={hit}, 预期 {should_exclude}')
     print(f'  ✅ _test_budget_exclude: {len(required)} 个排除词全部包含 + 4 个逻辑测试通过')
+
+
+def _test_open_date_keywords():
+    """P2-1: 验证 OPEN_DATE_KEYWORDS 覆盖合并标题格式。"""
+    required = {
+        "开标时间", "开标日期", "开启时间",
+        # 2026-06-25 P2-1 新增
+        "截止时间、开标时间和地点",
+        "递交截止时间、开标时间",
+        "投标截止时间、开标时间",
+        "文件开启时间",
+        "开启日期",
+    }
+    missing = [k for k in required if k not in OPEN_DATE_KEYWORDS]
+    if missing:
+        raise AssertionError(f'OPEN_DATE_KEYWORDS 漏了 {missing}')
+    # 验证合并标题在原文里能被 _extract_after_keyword 找到
+    for kw in ["截止时间、开标时间和地点", "递交截止时间、开标时间", "文件开启时间"]:
+        # kw 本身含中文逗号/,  — 确认 _extract_after_keyword 能处理
+        # 注意: _extract_after_keyword 内部用 re.escape, 含标点也能匹配
+        assert re.search(re.escape(kw), kw), f'kw 自身不匹配: {kw}'
+    print(f'  ✅ _test_open_date_keywords: {len(required)} 个关键词全部包含 + kw 自身能匹配')
 
 
 def enrich_all(dry_run: bool = False):
