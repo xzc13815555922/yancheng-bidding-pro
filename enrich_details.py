@@ -386,15 +386,19 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             else:
                 # 2026-06-25 P1-6 表格 fallback: kw 本身含单位 (如"采购预算(万元)"),
                 # 且后跟数字+单位 (yancheng_gov 意向公告表格列名格式)
-                if '(' in kw and ')' in kw:
+                if any(c in kw for c in '()（）'):
                     # 提取括号里的单位
                     m_unit = re.search(r'[（(](\S+?)[）)]', kw)
                     if m_unit:
                         bracket_unit = m_unit.group(1)
-                        # 表格格式: "采购预算(万元) | 150 | 单位:万元"
-                        # 允许: kw 之后任意非数字分隔 (|｜空白等), 紧跟数字
+                        # 2026-06-25 P2-3 修复: 支持 '采购预算' 与 '(万元)' 之间有
+                        # 任意空白/换行 (如 '采购预算  \n(万元)'),
+                        # 原 re.escape(kw) 模式要求连续, 漏 23/23 拆分型 case.
+                        # 新模式: 基础词 + 任意空白 + (单位) + 任意字符(非贪婪) + 数字
                         m_table = re.search(
-                            re.escape(kw) + r'[^\d]{0,15}([\d,.]+)',
+                            re.escape(re.sub(r'[（(].*?[）)]', '', kw).strip())  # 去掉括号的 '采购预算'
+                            + r'\s*[（(]\s*' + re.escape(bracket_unit) + r'\s*[）)]'
+                            + r'[\s\S]{0,30}?(\d[\d,.]*)',
                             text
                         )
                         if m_table:
@@ -926,6 +930,43 @@ def _test_open_date_keywords():
         # 注意: _extract_after_keyword 内部用 re.escape, 含标点也能匹配
         assert re.search(re.escape(kw), kw), f'kw 自身不匹配: {kw}'
     print(f'  ✅ _test_open_date_keywords: {len(required)} 个关键词全部包含 + kw 自身能匹配')
+
+
+def _test_budget_kw_split():
+    """P2-3: 验证 budget 关键词'采购预算' + 任意空白 + '(万元)' 拆分型能匹配."""
+    # 抽取 P1-6/P2-3 的拆分型匹配逻辑 (内联)
+    bracket_keywords = [k for k in BUDGET_KEYWORDS if any(c in k for c in '()（）')]
+
+    test_text_samples = [
+        # P2-3 bug 案例: 拆分型 (采购预算 + 空白 + (万元))
+        ('| 采购预算  \n(万元) | 500 | 2026-09 |', '500', '采购预算(万元)'),
+        # 连续型 (P1-6 修复后能跑)
+        ('采购预算(万元) | 150 | 单位:万元', '150', '采购预算(万元)'),
+        # 空格型
+        ('项目预算  \n(万元) | 200 |', '200', '项目预算(万元)'),
+        # 中文括号型
+        ('合同预估金额  \n（万元） | 800 |', '800', '合同预估金额（万元）'),
+    ]
+    fail = []
+    for text, expected_num, kw in test_text_samples:
+        if kw not in bracket_keywords:
+            fail.append(f'kw {kw!r} 不在 BUDGET_KEYWORDS 里')
+            continue
+        m_unit = re.search(r'[（(](\S+?)[）)]', kw)
+        bracket_unit = m_unit.group(1)
+        base = re.sub(r'[（(].*?[）)]', '', kw).strip()
+        pat = re.escape(base) + r'\s*[（(]\s*' + re.escape(bracket_unit) + r'\s*[）)][\s\S]{0,30}?(\d[\d,.]*)'
+        m = re.search(pat, text)
+        if not m:
+            fail.append(f'拆分型未命中: kw={kw!r}, text={text!r}')
+        elif m.group(1) != expected_num:
+            fail.append(f'拆分型数字错: kw={kw!r}, 预期 {expected_num!r} 实际 {m.group(1)!r}')
+
+    if fail:
+        for f in fail:
+            print(f'  ❌ {f}')
+        raise AssertionError(f'{len(fail)} 拆分型单测失败')
+    print(f'  ✅ _test_budget_kw_split: {len(test_text_samples)} 个拆分/连续/中文括号 case 全部正确解析')
 
 
 def enrich_all(dry_run: bool = False):
