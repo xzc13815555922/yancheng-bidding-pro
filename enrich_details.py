@@ -68,7 +68,14 @@ _BUDGET_INLINE_RE = [
     re.compile(r'总服务费用不超过\s*([\d.]+)\s*(万元|亿元|元)'),
     re.compile(r'采购规模[：:\s约]{0,4}([\d.]+)\s*(万元|亿元|元)'),
 ]
-BUDGET_EXCLUDE = ["保证金", "履约金", "押金", "违约金"]
+BUDGET_EXCLUDE = ["保证金", "履约金", "押金", "违约金",
+                 # 2026-06-25 审计 P1-7 新增 — 防止代理费/服务费被当采购预算
+                 # 背景: P1-6 修复后 85 条 award 类 budget 误匹配, 样本 a0f8192e
+                 # 实为招标代理服务费 62,700 元. 这些词后面跟的金额不是采购预算.
+                 "代理费", "服务费", "中介费", "咨询费", "评审费", "专家费",
+                 "手续费", "公证费", "审计费", "律师费", "鉴证费",
+                 "招标服务费", "招标代理服务费", "采购代理服务费",
+                 "交易服务费", "平台服务费"]
 OPEN_DATE_KEYWORDS  = ["开标时间", "开标日期", "开启时间"]
 DEADLINE_KEYWORDS   = ["报名截止", "投标截止", "截标时间", "递交截止", "报名截止时间", "截止时间"]
 EXPECTED_KEYWORDS   = ["预计挂网时间", "预计发布时间", "预计挂网日期", "预计公告时间"]
@@ -863,6 +870,33 @@ def _test_budget_keywords():
     if missing:
         raise AssertionError(f'BUDGET_KEYWORDS 漏了 {missing}')
     print(f'  ✅ _test_budget_keywords: {len(required)} 个关键词全部包含')
+
+
+def _test_budget_exclude():
+    """P1-7: 验证 BUDGET_EXCLUDE 覆盖代理费/服务费等被误匹配为预算的词。"""
+    required = {
+        "保证金", "履约金", "押金", "违约金",
+        # 2026-06-25 P1-7 新增
+        "代理费", "服务费", "中介费", "咨询费", "评审费", "专家费",
+        "手续费", "公证费", "审计费", "律师费", "鉴证费",
+        "招标服务费", "招标代理服务费", "采购代理服务费",
+        "交易服务费", "平台服务费",
+    }
+    missing = [k for k in required if k not in BUDGET_EXCLUDE]
+    if missing:
+        raise AssertionError(f'BUDGET_EXCLUDE 漏了 {missing}')
+    # 验证排除逻辑: 上下文里出现排除词 → 应被识别为不预算
+    test_text_samples = [
+        ("本项目招标代理服务费人民币62700元", True),   # 应排除
+        ("评审专家费共计 5000 元", True),            # 应排除
+        ("采购预算(万元) | 150", False),               # 不应排除
+        ("项目预算 200 万元", False),                 # 不应排除
+    ]
+    for text, should_exclude in test_text_samples:
+        hit = any(ex in text for ex in BUDGET_EXCLUDE)
+        if hit != should_exclude:
+            raise AssertionError(f'BUDGET_EXCLUDE 逻辑错误: {text!r} hit={hit}, 预期 {should_exclude}')
+    print(f'  ✅ _test_budget_exclude: {len(required)} 个排除词全部包含 + 4 个逻辑测试通过')
 
 
 def enrich_all(dry_run: bool = False):
