@@ -32,7 +32,7 @@ PROJ_DIR = Path(__file__).parent.parent
 DB_PATH  = PROJ_DIR / "data" / "tyc.db"
 MD_DIR   = PROJ_DIR / "data" / "pages" / "tyc"
 LOG_DIR  = PROJ_DIR / "logs"
-COOKIE_PATH = Path.home() / ".openclaw/plugin-skills/operator-bid-monitor/data/cookies.json"
+COOKIE_PATH = PROJ_DIR / "data" / "cookies.json"
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 MD_DIR.mkdir(parents=True, exist_ok=True)
@@ -535,7 +535,7 @@ def main():
     # Cookie
     if not COOKIE_PATH.exists():
         logger.error(f"❌ Cookie 不存在: {COOKIE_PATH}")
-        logger.error("  请先在 operator-bid-monitor 目录运行: python3 scripts/tyc_login.py")
+        logger.error("  请先运行: python3 crawlers/tyc_login.py")
         sys.exit(1)
     with open(COOKIE_PATH) as f:
         cookies = json.load(f)
