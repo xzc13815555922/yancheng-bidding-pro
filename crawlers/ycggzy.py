@@ -608,10 +608,7 @@ class YcggzyCrawlerPro(BaseCrawler):
                     "winning_amount": enriched.get("winning_amount"),
                     "region":       _area_to_region(area_code),
                     "district_code": area_code,
-                    "raw_json":     json.dumps(
-                        {k: v for k, v in item.items() if k != "content"},
-                        ensure_ascii=False
-                    ),
+                    "raw_json":     json.dumps(item, ensure_ascii=False),  # 2026-06-25 审计 P1-3 修复：保留 content 字段供二次富化
                     "detail_fetched": 1,  # content 已在列表响应里，直接标记完成
                 }
                 total += 1
