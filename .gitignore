@@ -2,6 +2,7 @@
 data/*.db
 data/pdfs/
 data/pages/
+data/cookies.json
 
 # 导出文件
 output/*.xlsx

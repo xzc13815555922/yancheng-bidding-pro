@@ -1,16 +1,18 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/3860条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + Excel + PDF月报 + PDF倒计时报告
+description: 全域盐城招标数据采集（12站/12120条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + Excel + PDF月报 + PDF倒计时报告 + 运营商综合月报
 outputs:
   - sqlite  # data/unified.db（三张表：tender/award/intention）
   - sqlite  # data/*.db（12个站点独立数据库）
+  - sqlite  # data/tyc.db（天眼查运营商中标数据）
   - excel   # output/盐城市全域招标信息_vN_YYYYMMDD_HHMM.xlsx
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
-version: v2.1
+  - pdf     # output/运营商综合月报_YYYYMM.pdf（三源合并：ybp+tyc+obm）
+version: v2.2
 status: 生产可用
-last_run: 2026-06-24
-records: 11825条原始（12站）→ unified.db 招标公告3674/中标3694/意向974；发包方缺口 tender12%/award8%/intention2%
+last_run: 2026-06-25
+records: 12120条原始（12站）→ unified.db 招标公告3721/中标3804/意向992；发包方缺口 tender12%/award8%/intention2%
 ---
 
 # 全域招标信息采集 Pro
@@ -62,7 +64,27 @@ python3 generate_countdown_report_pdf.py
 
 # 可选：导出 Excel
 python3 export_excel.py
+
+# 可选：生成运营商综合月报（三源合并）
+python3 generate_operator_combined_report.py --month YYYY-MM
 ```
+
+## 天眼查采集工作流（按月手动）
+
+```bash
+cd ~/.openclaw/workspace/yancheng-bidding-pro
+
+# 1. Cookie 过期时重新登录
+python3 crawlers/tyc_login.py
+
+# 2. 采集运营商中标数据（写入 data/tyc.db）
+python3 crawlers/tyc_crawler.py
+
+# 3. 生成运营商综合月报
+python3 generate_operator_combined_report.py --month YYYY-MM
+```
+
+> 天眼查招投标权限基于会员（有效期 2028 年），但 Cookie 服务端失效无法从时间戳判断，每月首次采集前建议重新登录。
 
 ## 报告脚本
 
@@ -127,34 +149,34 @@ python3 enrich_yancheng_gov.py
 | `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
 | `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
-## 数据质量现状（2026-06-23）
+## 数据质量现状（2026-06-25）
 
 ### unified.db 三表
 
 | 表       | 总条数 | 发包方   | 金额字段  | 开标时间  |
 |---------|------|--------|--------|--------|
-| tender  | 3714 | 3281 (88%) | budget 2904 (78%) | 3333 (90%) |
-| award   | 3634 | 3334 (92%) | winning_amount 2696 (74%) | — |
-| intention | 974 | 955 (98%) | budget 520 (53%) | — |
+| tender  | 3721 | ~88% | budget ~78% | ~90% |
+| award   | 3804 | ~92% | winning_amount ~74% | — |
+| intention | 992 | ~98% | budget ~53% | — |
 
-### 各站概况（unified.db 视角，跨站去重后）
+### 各站原始记录数（截至 2026-06-25）
 
-| 站点           | 条数   | 发包单位 | 预算/金额 | 开标时间 | 中标单位 |
-|--------------|------|--------|---------|--------|--------|
-| jszbcg       | 3549 | 3186   | 2849    | 1842   | 1652   |
-| ycggzy       | 2012 | 1725   | 1605    | 357    | 830    |
-| yancheng_gov | 1665 | 1597   | 913     | 575    | 539    |
-| dushi        | 222  | 210    | 153     | 96     | 65     |
-| chennan      | 183  | 183    | 153     | 93     | 87     |
-| sufu         | 169  | 169    | 169     | 47     | 0      |
-| jscn         | 158  | 152    | 99      | 87     | 57     |
-| dongfang     | 134  | 125    | 94      | 90     | 36     |
-| yueda        | 113  | 111    | 5       | 72     | 30     |
-| kaifaqu      | 62   | 57     | 39      | 46     | 2      |
-| jingkai      | 35   | 35     | 22      | 18     | 15     |
-| bigdata      | 20   | 20     | 19      | 10     | 10     |
+| 站点           | 原始记录 |
+|--------------|--------|
+| jszbcg       | 4140   |
+| ycggzy       | 4050   |
+| yancheng_gov | 2589   |
+| sufu         | 357    |
+| chennan      | 205    |
+| dushi        | 223    |
+| jscn         | 163    |
+| dongfang     | 135    |
+| yueda        | 119    |
+| kaifaqu      | 84     |
+| jingkai      | 35     |
+| bigdata      | 20     |
 
-> jszbcg tender 已完整覆盖 2026-01-04 至今（v2.0 历史补采后）
+> jszbcg 已覆盖 2026-01-04 至今全年历史
 
 ### 本地缓存覆盖
 
@@ -186,6 +208,20 @@ python3 enrich_yancheng_gov.py
 - **std_category 覆盖率 42%**：规则持续扩充中，bigdata/jingkai/jscn 历史数据完善后可提升
 - **ycggzy purchaser 结构性缺口 ~200条**：SPA API，部分记录无法回填
 - **yueda/sufu 金额字段 0 填充**：平台不披露/需登录
+
+---
+
+## 本轮修复清单（v2.1 → v2.2，2026-06-25）
+
+| # | 变更 | 说明 |
+|---|------|------|
+| 85 | 天眼查采集器 | 新增 `crawlers/tyc_crawler.py`（Playwright，采集13家运营商中标数据→tyc.db）；修复"中标方"检测逻辑（`inner_text()` 替代 `:text-is()`）|
+| 86 | 天眼查登录工具 | 新增 `crawlers/tyc_login.py`（Playwright 登录/刷新 Cookie） |
+| 87 | 运营商综合月报 | 新增 `generate_operator_combined_report.py`（三源合并：ybp+tyc+obm）；首页增加天眼查13家监控企业列表 |
+| 88 | 运营商月报 | 新增 `generate_operator_award_report.py`（单站点运营商中标月报） |
+| 89 | 区县打标 | `add_std_district.py` COMPANY_MAP 新增3所学校→盐南：盐城市第一中学、盐城市经贸高级职业学校、盐城市伍佑中学 |
+| 90 | 数据质量基线 | `verify_quality.py` jszbcg purchaser 0.95→0.88（历史补录数据），unified coverage 95%→90%（跨站去重 ~8%） |
+| 91 | 安全 | `.gitignore` 新增 `data/cookies.json`（天眼查敏感 Cookie） |
 
 ---
 

@@ -415,6 +415,44 @@ def build_pdf(records: list, output_path: str, month_str: str, stats: dict):
     elements.append(Spacer(1, 3*mm))
     elements.append(P("■ 招标平台=仅来自盐城12站招标平台  ■ 天眼查=仅来自天眼查  ■ 双源=两源均有（以招标平台为准）", "note"))
 
+    # 天眼查采集范围说明
+    elements.append(Spacer(1, 4*mm))
+    elements.append(P("天眼查采集范围（13家运营商）", "section"))
+    elements.append(Spacer(1, 2*mm))
+
+    TYC_COMPANIES = [
+        ("移动系", ["中国移动通信集团江苏有限公司", "中国移动通信集团江苏有限公司盐城分公司",
+                    "中移系统集成有限公司", "江苏移动信息系统集成有限公司"]),
+        ("电信系", ["中国电信股份有限公司江苏分公司", "中国电信股份有限公司盐城分公司",
+                    "中电鸿信信息科技有限公司"]),
+        ("联通系", ["中国联合网络通信有限公司江苏省分公司", "中国联合网络通信有限公司盐城市分公司"]),
+        ("广电系", ["江苏省广电有线信息网络股份有限公司", "江苏省广电有线信息网络股份有限公司盐城分公司"]),
+        ("铁塔系", ["中国铁塔股份有限公司江苏省分公司", "中国铁塔股份有限公司盐城市分公司"]),
+    ]
+    tyc_col_w = [W * 0.15, W * 0.85]
+    tyc_rows = [[P("集团", "hdr"), P("监控企业", "hdr")]]
+    tyc_style = [
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ("GRID",          (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+        ("BACKGROUND",    (0, 0), (-1, 0),  HEADER_BG),
+    ]
+    for i, (grp, names) in enumerate(TYC_COMPANIES):
+        row_idx = i + 1
+        tyc_rows.append([
+            P(grp, "cc"),
+            P("　".join(names), "cl"),
+        ])
+        bg = colors.white if row_idx % 2 else ROW_ALT
+        tyc_style.append(("BACKGROUND", (0, row_idx), (-1, row_idx), bg))
+
+    tyc_t = Table(tyc_rows, colWidths=tyc_col_w, repeatRows=1)
+    tyc_t.setStyle(TableStyle(tyc_style))
+    elements.append(tyc_t)
+
     # ══════════════════════════════════════════════════════════════════════
     #  第2-6页：各集团清单
     # ══════════════════════════════════════════════════════════════════════

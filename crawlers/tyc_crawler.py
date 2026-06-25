@@ -310,9 +310,13 @@ def parse_jingzhuang_page(page, company: dict) -> list:
 
     for tr in rows:
         try:
-            # 只保留"中标方"标签的行
+            # 只保留"中标方"标签的行（用 inner_text 包含检测，比 :text-is() 更稳健）
             second_td = tr.locator("td").nth(1)
-            if second_td.locator("*:text-is('中标方')").count() == 0:
+            try:
+                td_text = second_td.inner_text(timeout=2000)
+            except Exception:
+                continue
+            if "中标方" not in td_text:
                 continue
 
             cells = tr.locator("td").all()
