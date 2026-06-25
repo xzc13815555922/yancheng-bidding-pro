@@ -4,9 +4,11 @@ generate_operator_combined_report.py — 盐城通信运营商中标报告
 
 数据来源：
   1. data/unified.db  → award 表（盐城各招标平台，运营商作为中标方）
-  2. data/tyc.db      → tyc_awards 表（天眼查采集，盐城项目）
+  2. data/tyc.db      → tyc_awards 表（本项目天眼查采集，盐城项目）
+  3. operator-bid-monitor database.db → bid_records（已有天眼查历史数据）
 
-两源按"项目名前25字 + 发布日期"去重，以 unified.db 为主。
+三源按"项目名前25字 + 发布日期"去重，以 unified.db 为主。
+tyc.db 为空时自动使用 operator-bid-monitor 的数据。
 
 报告结构（参照 operator-bid-monitor PDF 格式）：
   第1页  汇总表（集团 × 中标数 / 中标金额 / 数据来源分布）
@@ -33,6 +35,7 @@ from datetime import datetime
 PROJ_DIR   = os.path.dirname(os.path.abspath(__file__))
 UDB_PATH   = os.path.join(PROJ_DIR, "data", "unified.db")
 TYC_PATH   = os.path.join(PROJ_DIR, "data", "tyc.db")
+OBM_PATH   = os.path.expanduser("~/.openclaw/plugin-skills/operator-bid-monitor/data/database.db")
 REPORT_DIR = os.path.join(PROJ_DIR, "output")
 os.makedirs(REPORT_DIR, exist_ok=True)
 
@@ -161,10 +164,58 @@ def load_tyc(month_str=None) -> list:
     return records
 
 
-def merge_and_dedup(ybp: list, tyc: list) -> list:
+def load_obm(month_str=None) -> list:
+    """从 operator-bid-monitor database.db 加载盐城天眼查数据"""
+    if not os.path.exists(OBM_PATH):
+        return []
+    conn = sqlite3.connect(OBM_PATH)
+    try:
+        if month_str:
+            y, m = int(month_str[:4]), int(month_str[5:7])
+            start = f"{y}-{m:02d}-01"
+            end   = f"{y+1}-01-01" if m == 12 else f"{y}-{m+1:02d}-01"
+            rows = conn.execute("""
+                SELECT br.publish_date, br.project_name, br.procuring_entity,
+                       e.short_name, e.parent_group, br.bid_amount, br.detail_url
+                FROM bid_records br
+                JOIN enterprises e ON br.source_enterprise_id = e.id
+                WHERE e.is_active=1 AND br.project_location LIKE '盐城%'
+                  AND br.publish_date >= ? AND br.publish_date < ?
+            """, (start, end)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT br.publish_date, br.project_name, br.procuring_entity,
+                       e.short_name, e.parent_group, br.bid_amount, br.detail_url
+                FROM bid_records br
+                JOIN enterprises e ON br.source_enterprise_id = e.id
+                WHERE e.is_active=1 AND br.project_location LIKE '盐城%'
+            """).fetchall()
+    except Exception:
+        conn.close()
+        return []
+    conn.close()
+
+    records = []
+    for pub_date, proj_name, purchaser, short, group, amount, url in rows:
+        # bid_amount 在 obm 里是万元单位
+        records.append({
+            "publish_date": pub_date or "",
+            "project_name": proj_name or "",
+            "purchaser":    purchaser or "",
+            "winner":       "",
+            "winner_short": short or "",
+            "group":        group or "",
+            "amount":       amount * 10000 if amount else None,  # 万→元，统一单位
+            "detail_url":   url or "",
+            "source":       "tyc",
+        })
+    return records
+
+
+def merge_and_dedup(ybp: list, tyc: list) -> tuple:
     """
-    合并去重：key = normalize(project_name)[:25] + publish_date
-    ybp 优先（winning_amount 更可靠）；tyc 独有记录追加
+    合并三源去重：key = normalize(project_name)[:25] + publish_date
+    优先级：ybp > tyc（本地）= obm（已合并进 tyc 参数）
     """
     seen = {}
     merged = []
@@ -178,7 +229,6 @@ def merge_and_dedup(ybp: list, tyc: list) -> list:
     for r in tyc:
         key = normalize_name(r["project_name"]) + "|" + r["publish_date"]
         if key in seen:
-            # 标记为双源
             merged[seen[key]]["source"] = "both"
         else:
             seen[key] = len(merged)
@@ -278,7 +328,8 @@ def build_pdf(records: list, output_path: str, month_str: str, stats: dict):
     elements.append(P("盐城通信运营商中标报告", "title"))
     elements.append(P(
         f"统计期间：{period}　　"
-        f"招标平台 {stats['ybp_total']} 条｜天眼查 {stats['tyc_total']} 条｜"
+        f"招标平台 {stats['ybp_total']} 条｜天眼查 {stats['tyc_total']} 条"
+        f"（本地{stats.get('tyc_local',0)}+obm{stats.get('tyc_obm',0)}）｜"
         f"去重后 {stats['merged_total']} 条（重叠 {stats['overlap']} 条）", "sub"
     ))
     elements.append(P(
@@ -435,7 +486,22 @@ def main():
     month_str = None if args.all else (args.month or datetime.now().strftime("%Y-%m"))
 
     ybp_records = load_unified(month_str)
-    tyc_records = load_tyc(month_str)
+
+    # 天眼查：优先用本地 tyc.db，为空时用 obm database.db
+    local_tyc = load_tyc(month_str)
+    obm_tyc   = load_obm(month_str)
+    # 合并两个天眼查来源（obm 作为补充，local_tyc 优先）
+    tyc_seen = set()
+    tyc_records = []
+    for r in local_tyc:
+        key = normalize_name(r["project_name"]) + "|" + r["publish_date"]
+        tyc_seen.add(key)
+        tyc_records.append(r)
+    for r in obm_tyc:
+        key = normalize_name(r["project_name"]) + "|" + r["publish_date"]
+        if key not in tyc_seen:
+            tyc_records.append(r)
+
     merged, tyc_only = merge_and_dedup(ybp_records, tyc_records)
 
     stats = {
@@ -443,6 +509,8 @@ def main():
         "tyc_total":    len(tyc_records),
         "merged_total": len(merged),
         "overlap":      len(tyc_records) - tyc_only,
+        "tyc_local":    len(local_tyc),
+        "tyc_obm":      len(obm_tyc),
     }
 
     for g in GROUP_ORDER:
