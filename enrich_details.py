@@ -53,6 +53,11 @@ BUDGET_KEYWORDS = [
     "标的额", "采购金额", "总服务费", "服务总费用", "总费用",
     "采购规模", "招标规模", "项目金额", "本次采购金额",
     "规模", "建设规模", "工程规模",
+    # 2026-06-25 审计 P1-6 新增 — 抽自 yancheng_gov 意向公告表头 1363 次
+    # 带括号单位的列名变种 (需 _parse_amount 处理)
+    "采购预算(万元)", "项目预算(万元)",
+    "合同预估金额（万元）", "合同预计金额（万元）",
+    "预算金额（万元）", "最高限价(万元)", "招标控制价(万元)",
 ]
 # 非关键词触发的 budget 正则（句中直接出现）
 _BUDGET_INLINE_RE = [
@@ -365,7 +370,27 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             if m_direct:
                 chunk = m_direct.group(1) + m_direct.group(2)
             else:
-                continue
+                # 2026-06-25 P1-6 表格 fallback: kw 本身含单位 (如"采购预算(万元)"),
+                # 且后跟数字+单位 (yancheng_gov 意向公告表格列名格式)
+                if '(' in kw and ')' in kw:
+                    # 提取括号里的单位
+                    m_unit = re.search(r'[（(](\S+?)[）)]', kw)
+                    if m_unit:
+                        bracket_unit = m_unit.group(1)
+                        # 表格格式: "采购预算(万元) | 150 | 单位:万元"
+                        # 允许: kw 之后任意非数字分隔 (|｜空白等), 紧跟数字
+                        m_table = re.search(
+                            re.escape(kw) + r'[^\d]{0,15}([\d,.]+)',
+                            text
+                        )
+                        if m_table:
+                            chunk = m_table.group(1) + bracket_unit
+                        else:
+                            continue
+                    else:
+                        continue
+                else:
+                    continue
         ctx = text[max(0, text.find(kw) - 20):text.find(kw) + 80] if kw in text else ""
         if any(ex in ctx for ex in BUDGET_EXCLUDE):
             continue
