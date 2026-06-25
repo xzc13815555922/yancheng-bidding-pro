@@ -145,6 +145,7 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
         f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
         t2
     ))
+    # P0-2 警告已于 2026-06-25 移除（reenrich_jszbcg_open_date.py 已修负 1683 条 open_date 从 openBidTime→真开标时间）
 
     h  = _style(f, "SH",  fontSize=8.5, alignment=TA_CENTER,
                 textColor=colors.white, leading=12)

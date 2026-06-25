@@ -230,6 +230,7 @@ def build(run_date: Optional[date] = None):
         f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
         s_sub
     ))
+    # P0-2 警告已于 2026-06-25 移除（reenrich_jszbcg_open_date.py 已修复 1683 条 open_date 从 openBidTime→真开标时间）
     story.append(HRFlowable(width="100%", thickness=1,
                              color=MID_BLUE, spaceAfter=0.3*cm))
 
