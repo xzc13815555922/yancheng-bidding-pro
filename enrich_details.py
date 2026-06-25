@@ -53,6 +53,8 @@ BUDGET_KEYWORDS = [
     "标的额", "采购金额", "总服务费", "服务总费用", "总费用",
     "采购规模", "招标规模", "项目金额", "本次采购金额",
     "规模", "建设规模", "工程规模",
+    # 2026-06-25 审计 P2-1 新增 — jszbcg 招标公告固定格式"自筹资金/财政资金：48万元"
+    "自筹资金", "财政资金", "财政性资金",
     # 2026-06-25 审计 P1-6 新增 — 抽自 yancheng_gov 意向公告表头 1363 次
     # 带括号单位的列名变种 (需 _parse_amount 处理)
     "采购预算(万元)", "项目预算(万元)",
@@ -162,6 +164,8 @@ _CIRCLE_NUM_RE = re.compile(r'^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]')
 
 def _clean_purchaser_val(val: str) -> str:
     """剥除提取结果中常见的前缀/后缀噪声。"""
+    import html as _html_lib
+    val = _html_lib.unescape(val)   # &nbsp; 等 HTML 实体（ycggzy raw_json 残留）
     # 【xxx】前缀（来自网站公告标题残留）
     val = re.sub(r'^【[^】]{2,12}】\s*', '', val)
     # [上一篇]()[  或 [xxx 导航残留
@@ -432,6 +436,9 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         # 基础合理性过滤：金额必须有明确单位；金额范围 100元~50亿元
         has_unit = bool(re.search(r'[万元亿]', chunk))
         if amount and amount > 0 and has_unit and 100 <= amount <= 5e10:
+            # 过滤文件工本费/单价误提取（jszbcg常见："500元/套""225元/吨""售后不退"）
+            if re.search(r'/[吨套件个平米㎡月年天]|售后不退|工本费|文件费|汇款账', chunk):
+                continue
             result["budget"] = amount
             result["budget_unit"] = unit
             result["budget_text"] = chunk[:40]
@@ -567,7 +574,23 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             if m_org:
                 val = m_org.group(0).strip()
             if 4 < len(val) < 50 and _ORG_PATTERN.search(val):
-                winner_val = val
+                # jszbcg "中标人：详见公告内容..." 型伪值
+                if not re.search(r'^详见|见公示|见公告|类型投标报价', val):
+                    winner_val = val
+        if not winner_val:
+            # 候选人公示格式："中标候选人名单 第一名：XXX" (yueda等)
+            # _extract_after_keyword 因"名单 第1名"超过5字符限制而失败，此处独立处理
+            m_cand = re.search(
+                r'(?:中标候选人名单|候选人名单)[\s\S]{0,20}?第[一1]名\s*[：:]\s*([^\n,，;；]{4,50})',
+                text
+            )
+            if m_cand:
+                v = m_cand.group(1).strip()
+                m_c2 = re.match(rf'.{{2,40}}?(?:{_ORG_SUFFIX})', v)
+                if m_c2:
+                    v = m_c2.group(0).strip()
+                if _ORG_PATTERN.search(v) and 4 < len(v) < 50:
+                    winner_val = v
         if not winner_val:
             # 政府采购网表格格式：中标/成交金额\n1\t供应商名称...
             t_stripped = re.sub(r'\s+', '', text)

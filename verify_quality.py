@@ -17,23 +17,23 @@ SITE_BASELINES = {
     "jszbcg": {
         "count":     1300,
         "purchaser": 0.88,   # 历史补录数据填充率较低，实际~89.6%
-        "budget":    0.28,   # OCR 提取，图片 PDF 覆盖率有限
-        "winner":    0.35,
+        "budget":    0.36,   # P2-1 加入"自筹资金"关键词后 78%→85%(tender)，整体38%
+        "winner":    0.38,   # P0清18条伪winner后94.6%（award类），全量40%
     },
     "yancheng_gov": {
         "count":     850,
-        "purchaser": 0.94,
+        "purchaser": 0.97,   # 意向公告purchaser修复后 98%
     },
     "ycggzy": {
         "count":     1280,
-        "purchaser": 0.92,
+        "purchaser": 0.90,   # raw_json CDATA修复后新增1390条page，92%
     },
     "sufu": {
         "count":     190,
         "purchaser": 0.99,   # 纯 API，应接近 100%
         "budget":    0.99,
     },
-    "yueda":    {"count": 80,  "purchaser": 0.85},
+    "yueda":    {"count": 80,  "purchaser": 0.85, "winner": 0.48},  # 候选人格式修复后 award 94%
     "dongfang": {"count": 40,  "purchaser": 0.75},
     "jscn":     {"count": 38,  "purchaser": 0.85},
     "dushi":    {"count": 33,  "purchaser": 0.70},

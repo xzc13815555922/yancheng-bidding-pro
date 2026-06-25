@@ -186,12 +186,19 @@ def download_ycggzy():
             if not content or len(content.strip()) < 20:
                 no_content += 1
                 continue
+            # ycggzy raw_json.content 是 CDATA 包装的 HTML，需剥除外层
+            if content.lstrip().startswith("<![CDATA["):
+                content = re.sub(r'^<!\s*\[CDATA\[', '', content.lstrip(), count=1)
+                content = re.sub(r'\]\]>$', '', content.rstrip())
             md = _h2t.handle(content).strip()
             if len(md) < 20:
                 no_content += 1
                 continue
             md_file.write_text(f"# ycggzy/{rid}\n\n{md}", encoding="utf-8")
-            conn.execute("UPDATE notices SET page_path=? WHERE id=?", (str(md_file), rid))
+            conn.execute(
+                "UPDATE notices SET page_path=?, detail_fetched=0 WHERE id=?",
+                (str(md_file), rid)
+            )
             ok += 1
         except Exception:
             no_content += 1
