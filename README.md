@@ -2,7 +2,9 @@
 
 盐城市 12 个招标网站的数据采集、富化、分类和报告生成系统。
 
-**当前版本**：v2.2 | **数据量**：8517 条（unified.db 三表合计） | **最后更新**：2026-06-25
+**当前版本**：v2.4 | **数据量**：8517 条（unified.db 三表合计） | **最后更新**：2026-06-25
+
+> **v2.4 变更说明（2026-06-25）**：①②③④⑤为 v2.3 变更（详见末尾 v2.3 修复清单）。v2.4 新增：⑥ 修 P0-2 jszbcg open_date 真开标时间解析（1683 条）⑦ 修 P1-3 ycggzy raw_json 保留 content + 补救（1810 条×4 字段）⑧ 修 P1-4/5/6/7 + P2-1 富化层 5 个关键词补齐。合计修复历史记录 3789 条，误匹配清理 80 条。
 
 ## 覆盖站点（12个）
 
@@ -154,20 +156,21 @@ python3 generate_operator_combined_report.py --month 2026-06
 python3 generate_operator_award_report.py --month 2026-06
 ```
 
-### 天眼查运营商数据采集（按月手动，需登录）
+### 天眼查运营商数据采集（每日自动 + Cookie 失效时手动）
 
 ```bash
 # 首次或 Cookie 过期时重新登录（Playwright，会保存 data/cookies.json）
 python3 crawlers/tyc_login.py
 
-# 采集本月运营商中标数据（写入 data/tyc.db）
-python3 crawlers/tyc_crawler.py
+# 采集运营商中标数据（写入 data/tyc.db）— 每天 05:00 cron 自动跑
+python3 crawlers/tyc_crawler.py --days 1
 
 # 仅验证 Cookie 有效性（不会测试招投标会员权限）
 python3 crawlers/tyc_login.py --verify-only
 ```
 
-> **注意**：天眼查招投标数据需会员权限（有效期至 2028 年）。Cookie 服务端失效无法从 Cookie 时间戳判断，每月首次采集前建议重新登录刷新。
+> **重要**：`--days 1` 仅取近 1 天数据，因为数据已存在 DB，去重后基本不增加新记录但提前停止翻页（45分钟 → 4分钟）。
+> 天眼查招投标数据需会员权限（有效期至 2028 年）。Cookie 服务端失效无法从 Cookie 时间戳判断，建议每月手动登录一次。
 
 ### 单站点操作
 
@@ -209,3 +212,128 @@ python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 - **yueda 预算 97% 空**：网站公告页本身不披露预算金额
 - **ycggzy**：SPA 页面，数据来自列表 API 的 `raw_json`，不走 HTML 富化
 - **bigdata**：静态页面仅展示最近 10 页，无法回溯历史
+
+---
+
+## 修复清单（v2.2 → v2.3，2026-06-25）
+
+### 修复 #92：05:00 cron stall timeout 问题
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | cron 用 `agentTurn` 模式调度 9 步 Python 脚本，agent 调用 exec 后长时间无新 model call，系统判定 stall，10 分钟后强制 timeout |
+| 修复 | 新增 `run-full-pipeline.sh` bash 脚本（10 步独立脚本），cron payload 改为只调一行 `bash run-full-pipeline.sh` |
+| 文件 | `run-full-pipeline.sh`（新增） |
+| 验证 | 手动跑 4 分钟完成全部 10 步（含天眼查 + 12站采集 + 3 份 PDF + Excel） |
+| cron 变化 | 任务名改为 `yancheng-bidding-pro daily 5:00 full pipeline`，timeout 1800s → 3600s |
+
+### 修复 #93：tyc_crawler 提速 10 倍（45min → 4min）
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | `crawlers/tyc_crawler.py` 默认不传 `--days`，每家运营商翻满 `MAX_PAGES=20` 页（×13 家=45 分钟） |
+| 根因 | cron 已设置每天跑一次，DB 里已有数据。采集器仍然全量翻页是浪费 |
+| 修复 | `run-full-pipeline.sh` 调用时加 `--days 1`，第 1 页检测到超出窗口立即停止翻页 |
+| 文件 | `run-full-pipeline.sh` 第 2 步调用方式 |
+| 验证 | 13 家运营商 4 分钟跑完，新增 0 条（已去重），2 条盐城 MD 已入库 |
+
+### 修复 #94：取消 Excel 推送（同步三处）
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | SKILL.md 历史定义了 Excel 输出，08:30 推送 cron 也推了 Excel，但用户实际只需要 3 份 PDF |
+| 修复 | 同步修改三处：① `SKILL.md` outputs 移除 excel、加⚠️ 说明 ② `run-full-pipeline.sh` 移除 `export_excel.py` 步骤 ③ 08:30 推送 cron 移除 Excel 推送 |
+| 文件 | `SKILL.md`、`run-full-pipeline.sh`、cron job `f605317e-bb5c-4a0d-b605-efdc31a609b4` |
+| 说明 | `export_excel.py` 脚本保留，需要时手动运行即可，不进生产流程 |
+
+### 修复 #95：P0-1 修复 — pipeline 补 download_site_pages.py（顺手修 import re 隐藏 bug）
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | `run-full-pipeline.sh` 漏掉 `download_site_pages.py` 步骤；新采 HTML 站详情页永远无 page_path，富化无米下锅 |
+| 隐藏 bug | `download_site_pages.py` 缺 `import re`，脚本从未成功跑过！解释了为什么 sufu/ycggzy page_path 历史为 0% |
+| 修复 | ① `run-full-pipeline.sh` 加 Step 2.5 `download_site_pages.py` ② `download_site_pages.py` 加 `import re` |
+| 验证 | 新 3 天数据 page_path 比例从 38.8% → 77.0%（+222 条），sufu 从 0/419 → 415/419（+415 条） |
+
+### 修复 #96：B 短期 — 月报/倒计时报告加红字警告（jszbcg open_date 字段语义错误）
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | 阿明审计发现 jszbcg 站 `open_date` 实际用的是 `openBidTime`（发布时间），代码注释里也说了。1881 条"开标时间"全部失真。CEO 关注的"开标倒计时报告"直接受影响 |
+| 短期修复 | ① `generate_tender_report.py` 首页加红字警告 `⚠️ 警告：jszbcg 站的"开标时间"字段实际为招标公告的发布时间，并非真实开标时间。长期修复中（月底）。` ② `generate_countdown_report_pdf.py` 同上 |
+| 长期修复 | **#97 已修复**：见下文 |
+| 文件 | `generate_tender_report.py`、`generate_countdown_report_pdf.py` |
+
+### 修复 #97：B 长期 — jszbcg 真开标时间解析（核心修复）
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | jszbcg 站 `crawlers/jszbcg.py:262` 用 `openBidTime` 写 open_date，实际是发布时间。1881 条全部失真 |
+| 修复 | 新建 `reenrich_jszbcg_open_date.py`：读 page_path MD，正则解析 4 类格式（开标时间/文件开启时间/开启时间/开标日期）；支持 OCR 空格格式（2026 年 07 月 03 日 15 时 00 分） |
+| 验证 | 候选 1710 条，命中 1690（99.4%），写入 DB 1683 条；合理性 99.9% open_date >= publish_date |
+| 同步 | 移除月报/倒计时报告红字警告（字段已修复） |
+| 文件 | `reenrich_jszbcg_open_date.py`（新增 156 行）、`generate_tender_report.py`（去警告）、`generate_countdown_report_pdf.py`（去警告） |
+| git commit | `d1c46ab` |
+
+### 修复 #98：C — ycggzy 改 1 行 + 补救脚本
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | `crawlers/ycggzy.py:611` 显式 `if k != "content"` 排除 content，富化机会只有一次，漏抓无补救 |
+| 修复 | ① 改 `crawlers/ycggzy.py:611` 改成 `json.dumps(item)` 保留 content ② 新建 `reenrich_ycggzy_from_list_api.py`（270 行）补救 4050 条历史 |
+| 验证 | 命中 code 2342/2373 (98.7%)，解析 2336，DB 写入 1810；4 关键字段填充率：winning_amount 0→30.0%、deadline 0→21.7%、budget_unit 0→42.8%、budget_text 0→42.8% |
+| 关键 | `raw_json.content` 永久修复，未来可二富化 |
+| git commit | `cfb89ad` |
+
+### 修复 #99-#103：富化层 5 个关键词/排除词补齐
+
+| # | 修复 | 关键数据 | git commit |
+|---|------|---------|-----------|
+| 99 | P1-4 `_ORG_SUFFIX` 扩 12+ 后缀（中学/联合会/党委/村委等） | yancheng_gov purchaser +41 条（96.8%→98.3%）| `a11185b` |
+| 100 | P1-5 `WINNER_KEYWORDS` 加"供应商名称"等 5 个表格列名 | award winner 99.1%→99.3%（+1 条历史，未来关键） | `5a5b0f6` |
+| 101 | P1-6 `BUDGET_KEYWORDS` 补"采购预算(万元)"等 7 个带括号单位变种 + 表格 fallback 逻辑 | yancheng_gov budget +43 条（28.6%→30.2%） | `3a8f954` |
+| 102 | P1-7 `BUDGET_EXCLUDE` 加"代理费/服务费"等 16 个排除词 | 清理 80 条 award 类误匹配（85→5 条），全站 budget 27.2%（健康值） | `2e51c17` |
+| 103 | P2-1 `OPEN_DATE_KEYWORDS` 加"截止时间、开标时间和地点"等 5 个合并标题 | yancheng_gov open_date +31 条（23.5%→24.7%）| `e8d00cb` |
+
+### 修复 #104：v2.4 文档同步
+
+- README.md：本节补充 v2.3→v2.4 全部 8 个修复记录（#97-#103）
+- SKILL.md：同步 v2.3 → v2.4 版本号 + 修复清单
+
+### 修复 #105：P2-3 — budget 关键词'采购预算' + 空白 + '(万元)' 拆分型匹配
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | yancheng_gov 意向公告表格拆分型'采购预算  \n(万元) | 500'，P1-6 re.escape(kw) 要求连续 100% 漏采；抽样 30 条 23/23 拆分型全军覆没 |
+| 修复 | enrich_details.py BUDGET 处理段 P1-6 fallback 改用拆解模式: 基础词+任意空白+(单位)+任意字符(非贪婪)+数字；同时修'if (\' in kw'只匹配英文括号 bug |
+| 验证 | yancheng_gov budget +19 条 (P1-6 未采到的拆分型)；单测 _test_budget_kw_split() 4 个 case 全过 |
+| 文件 | enrich_details.py (+45/-4) |
+| git commit | `3b57baa` |
+
+### 修复 #106：P2-4 — add_std_district.py CODE_MAP 错标（320903=盐南→盐都）
+
+| 项目 | 说明 |
+|------|------|
+| 问题 | add_std_district.py:25 误把 district_code=320903 标'盐南'。ycggzy 爬虫 _area_to_region 映射 320903='盐都区'。导致 256 条 ycggzy+ 干提记录被误归盐南, 盐南虚高 |
+| 修复 | ① 320903 '盐南'→'盐都' ② 新增 320971='盐南' (ycggzy API 实际用此代码) ③ 保留 320992='盐南' (历史兼容) |
+| 验证 | ycggzy '盐南' 256→43 条 (213 归到盐都); yancheng_gov 同步修复; intention report 清单 1: 7→6 (少 1 条大冈镇错标), 清单 2 候选: 57→40 (少 17 条盐都混入) |
+| 备份 | data/backup/ycggzy.bak-20260625-P24, data/backup/yancheng_gov.bak-20260625-P24 |
+| 文件 | add_std_district.py (+6/-1) |
+| git commit | (待提交) |
+
+---
+
+## v2.4 累计效果一览
+
+| 维度 | 修复前 | 修复后 |
+|------|-------|-------|
+| 新采数据 page_path | 38.8% | 77.0% |
+| sufu page_path | 0 | 99.0% |
+| jszbcg open_date 真实率 | 0% | 99.9%（1683 条） |
+| ycggzy winning_amount | 0% | 30.0% |
+| ycggzy deadline | 0% | 21.7% |
+| ycggzy raw_json.content | 0% | 永久修复 |
+| yancheng_gov purchaser | 96.8% | 98.3% |
+| yancheng_gov budget（健康值）| 28.6% 含 80 条假数据 | 27.2% 全真 |
+| yancheng_gov award winner | 99.1% | 99.3% |
+| yancheng_gov open_date | 23.5% | 24.7% |
