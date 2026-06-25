@@ -132,15 +132,18 @@ def _query_preexisting_intentions(year_month: str) -> List[dict]:
 
 
 def _load_tender_pool() -> List[dict]:
-    """加载 tender 表里所有盐南+经开+标NULL 记录, 用于清单 2 剔除."""
+    """加载 tender 表里所有盐南+经开 记录, 用于清单 2 剔除.
+
+    2026-06-25 修复: 移除 proj_major_cat/proj_minor_cat IS NULL 过滤.
+    原因: 清单 2 意图是剔除'所有已挂的招标', 不论是否已分类.
+          原过滤导致 357 条 tender 被排除, 漏剔除 已分类的招标 (如大吉发电厂加固/恒纬商务港).
+    """
     conn = sqlite3.connect(str(UNIFIED_DB))
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
         SELECT purchaser, project_name, detail_url, publish_date
         FROM tender
         WHERE std_district IN (?, ?)
-          AND proj_major_cat IS NULL
-          AND proj_minor_cat IS NULL
     """, DISTRICTS).fetchall()
     conn.close()
     return [dict(r) for r in rows]
