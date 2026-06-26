@@ -10,30 +10,10 @@ build_unified.py — 将12个站点 DB 汇总为统一数据库
 import sqlite3
 from pathlib import Path
 
+from config import SITES, SITE_NAMES
+
 DATA_DIR = Path(__file__).parent / "data"
 UNIFIED_DB = DATA_DIR / "unified.db"
-
-SITES = [
-    "jszbcg", "yancheng_gov", "ycggzy", "sufu",
-    "yueda", "dushi", "jscn", "chennan",
-    "dongfang", "bigdata", "jingkai", "kaifaqu",
-]
-
-# 网站名称映射
-SITE_NAMES = {
-    "jszbcg":       "江苏招标采购服务平台",
-    "yancheng_gov": "盐城市政府采购网",
-    "ycggzy":       "盐城市公共资源交易平台",
-    "sufu":         "苏服务",
-    "yueda":        "悦达集团阳光采购平台",
-    "dushi":        "盐城市都市建设投资集团有限公司",
-    "jscn":         "江苏世纪新城投资控股集团有限公司",
-    "chennan":      "江苏省盐南高新区公共资源交易电子化服务平台",
-    "dongfang":     "盐东方产业投资集团有限公司",
-    "bigdata":      "盐城市大数据集团",
-    "jingkai":      "盐城经开城市发展投资集团有限公司",
-    "kaifaqu":      "盐城经济技术开发区行政审批局公共资源交易服务平台",
-}
 
 DDL_TENDER = """
 CREATE TABLE IF NOT EXISTS tender (

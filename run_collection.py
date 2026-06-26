@@ -16,21 +16,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# 采集器注册表（site_key → crawler模块路径 + 类名）
-CRAWLERS = [
-    ("jszbcg",       "crawlers.jszbcg",          "JSZbcgCrawlerPro"),
-    ("yancheng_gov", "crawlers.yancheng_gov",     "YanchengGovCrawlerPro"),
-    ("ycggzy",       "crawlers.ycggzy",           "YcggzyCrawlerPro"),
-    ("bigdata",      "crawlers.bigdata",          "BigdataCrawlerPro"),
-    ("jingkai",      "crawlers.jingkai",          "JingkaiCrawlerPro"),
-    ("kaifaqu",      "crawlers.chennan_kaifaqu",  "KaifaquCrawlerPro"),
-    ("chennan",      "crawlers.chennan_kaifaqu",  "ChengnanCrawlerPro"),
-    ("dongfang",     "crawlers.dongfang",         "DongfangCrawlerPro"),
-    ("dushi",        "crawlers.dushi",            "DushiCrawlerPro"),
-    ("jscn",         "crawlers.jscn",             "JscnCrawlerPro"),
-    ("yueda",        "crawlers.yueda",            "YuedaCrawlerPro"),
-    ("sufu",        "crawlers.sufu",             "SufuCrawlerPro"),
-]
+from config import CRAWLERS
 
 DATA_DIR = Path(__file__).parent / "data"
 

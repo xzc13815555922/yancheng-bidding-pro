@@ -35,6 +35,9 @@ def _parse_uuid_date(href: str) -> Tuple[str, str, str]:
 
 def _infer_type_from_cat(catcode2: str, title: str) -> str:
     """根据子目录代码 + 标题推断 notice_type。"""
+    # 标题优先：流标/废标/终止/暂停/更正/澄清 无论 catcode 如何都归 other
+    if any(k in title for k in ("流标", "废标", "终止公告", "暂停公告", "更正公告", "澄清公告", "补充公告")):
+        return "other"
     # 末位数字: 1=招标 2=资格 3=澄清 4=候选人 5=中标/成交 6=终止 7=合同
     last = catcode2[-1] if catcode2 else ""
     if last in ("4", "5") or "中标" in catcode2 or "成交" in catcode2:

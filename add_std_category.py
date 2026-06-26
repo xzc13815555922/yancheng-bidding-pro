@@ -5,18 +5,25 @@ add_std_category.py — 给12个DB添加 proj_minor_cat（小类）和 proj_majo
 分类原则：
   - 拿不准的保持 NULL，不强行分类
   - 规则按优先级顺序匹配，首次命中即止
-  - 每条规则：(小类, 大类, must_any: list, must_not_any: list)
-  - must_any: project_name 中至少含一个词
-  - must_not_any: project_name 中不能含任何一个词（排除误判）
-
-大类体系（与用户逐类确认后逐步添加）：
-  物业外包服务 / 市政工程 / 项目相关服务 / ...
+  - 规则来源：rules/category.yaml（修改规则直接编辑 YAML 文件，无需改代码）
 """
 
 import sqlite3
 from pathlib import Path
 
-RULES = [
+try:
+    import yaml as _yaml
+    _YAML_PATH = Path(__file__).parent / "rules" / "category.yaml"
+    _raw = _yaml.safe_load(_YAML_PATH.read_text(encoding="utf-8"))
+    RULES = [
+        (r["minor"], r["major"], r["must_any"], r.get("must_not") or [])
+        for r in _raw["categories"]
+    ]
+except Exception as _e:
+    import warnings
+    warnings.warn(f"无法加载 rules/category.yaml，使用内置规则: {_e}")
+    # 内置规则（兜底，保持向后兼容）
+    RULES = [
 
     # ══════════════ 物业外包服务 ══════════════
     # 注：物业类软件/平台/信息化系统不归此类
@@ -433,7 +440,7 @@ RULES = [
       "资产处置项目"],
      ["土地", "软件", "平台", "系统", "信息化", "数字化", "智能化", "人工智能"]),
 
-]
+]  # end RULES（内置兜底，仅当 YAML 加载失败时使用）
 
 
 def classify(project_name: str):
@@ -447,12 +454,8 @@ def classify(project_name: str):
     return None, None
 
 
+from config import SITES
 DB_DIR = Path(__file__).parent / "data"
-SITES = [
-    "jszbcg", "yancheng_gov", "ycggzy", "sufu",
-    "yueda", "dushi", "jscn", "chennan",
-    "dongfang", "bigdata", "jingkai", "kaifaqu",
-]
 
 total_all = filled_all = 0
 

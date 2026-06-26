@@ -57,11 +57,14 @@ def save_page_md(html: str, url: str, site_key: str, title: str) -> str:
 
 
 def infer_notice_type(text: str) -> str:
+    # 异常结果公告（流标/终止等）优先于中标判断，避免误归 award
+    if any(k in text for k in ("流标", "废标", "终止公告", "暂停公告", "更正公告", "澄清公告", "补充公告")):
+        return "other"
     if any(k in text for k in ("中标", "成交", "候选", "结果公告", "结果公示", "评审结果", "合同", "中选")):
         return "award"
     if any(k in text for k in ("采购意向", "意向公告", "预算公告")):
         return "intention"
-    if any(k in text for k in ("废标", "更正公告", "终止", "澄清", "补充公告")):
+    if any(k in text for k in ("终止", "更正", "澄清", "废标")):
         return "other"
     return "tender"
 
