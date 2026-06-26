@@ -2,6 +2,7 @@
 """HTML类站通用工具：notice_type推断、分页URL生成、列表条目解析。"""
 import re
 from pathlib import Path
+from typing import Optional
 
 import html2text as _h2t_mod
 import requests
@@ -67,6 +68,62 @@ def infer_notice_type(text: str) -> str:
     if any(k in text for k in ("终止", "更正", "澄清", "废标")):
         return "other"
     return "tender"
+
+
+_SUBTYPE_RULES = [
+    ("流标废标", ("流标", "废标", "招标失败", "采购失败", "意向废止", "招标失败公告", "失败公告")),
+    ("终止暂停", ("终止", "暂停", "撤销", "中止")),
+    ("更正变更", ("更正", "变更", "补充公告", "澄清", "答疑", "延期", "二次公告", "修正", "修改")),
+    ("合同履约", ("合同", "履约")),
+    ("候选公示", ("候选", "竞价结果", "单一来源", "入围遴选", "入围公告", "不招标")),
+]
+
+
+def classify_other_subtype(name: str, type_hint: str = "") -> str:
+    """将 notice_type='other' 的记录细分为可报告的子类型。
+    type_hint: 可选的原始 typeName/type 字段（从 raw_json 提取），辅助识别项目名无明确关键词的情况。
+    """
+    text = name + " " + type_hint
+    for subtype, keywords in _SUBTYPE_RULES:
+        if any(k in text for k in keywords):
+            return subtype
+    return "其他"
+
+
+def parse_datetime(raw: str) -> Optional[str]:
+    """归一化各种日期时间格式为 'YYYY-MM-DD HH:MM:SS'。"""
+    if not raw:
+        return None
+    raw = re.sub(r'[*_~`]', '', raw)
+    raw = re.sub(r'\s+', '', raw)
+    raw = raw.replace('：', ':')
+    patterns = [
+        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:点](\d{1,2})分?(\d{1,2})?秒?',
+        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:点](\d{1,2})',
+        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})时',
+        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})',
+    ]
+    for pat in patterns:
+        m = re.search(pat, raw)
+        if m:
+            g = m.groups()
+            y, mo, d = g[0], g[1], g[2]
+            hh = g[3] if len(g) > 3 and g[3] else "00"
+            mm = g[4] if len(g) > 4 and g[4] else "00"
+            ss = g[5] if len(g) > 5 and g[5] else "00"
+            return f"{int(y):04d}-{int(mo):02d}-{int(d):02d} {int(hh):02d}:{int(mm):02d}:{int(ss):02d}"
+    return None
+
+
+def parse_date_only(raw: str) -> Optional[str]:
+    """解析日期为 'YYYY-MM-DD'。"""
+    if not raw:
+        return None
+    raw = re.sub(r'\s+', '', raw)
+    m = re.search(r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})', raw)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return None
 
 
 def extract_date(text: str) -> str:

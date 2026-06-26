@@ -1,19 +1,19 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/12120条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报（不导出Excel）
+description: 全域盐城招标数据采集（12站/12365条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报（不导出Excel）
 outputs:
-  - sqlite  # data/unified.db（三张表：tender/award/intention）
+  - sqlite  # data/unified.db（四张表：tender/award/intention/other + project_links + project_chain视图）
   - sqlite  # data/*.db（12个站点独立数据库）
   - sqlite  # data/tyc.db（天眼查运营商中标数据）
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
   - pdf     # output/运营商综合月报_YYYYMM.pdf（三源合并：ybp+tyc+obm）
-version: v2.4
+version: v2.6
 status: 生产可用
-last_run: 2026-06-25
-records: 12225条原始（12站）→ unified.db 招标公告3728/中标3857/意向993；发包方缺口 tender10%/award8%/intention2%
+last_run: 2026-06-26
+records: 12365条原始（12站）→ unified.db tender:3732/award:3879/intention:1128/other:3031；project_links:2652条(68%覆盖)
 
-> **v2.4 变更（2026-06-25）**：P0+P1 全站字段质量修复：① jszbcg budget 文件工本费/单价误提取清除（14条）② jszbcg winner "详见公告内容"伪值清除（19条）③ ycggzy purchaser HTML实体去除（&nbsp;）④ 加"自筹资金/财政资金"关键词 jszbcg tender budget 78%→85% ⑤ ycggzy raw_json CDATA修复新增1390条MD文件 ⑥ yueda winner候选人格式 46%→94%。详见末尾「本轮修复清单（v2.3 → v2.4）」。
+> **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
 ---
 
 # 全域招标信息采集 Pro
@@ -149,26 +149,21 @@ python3 enrich_yancheng_gov.py
 | `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
 | `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
-## 数据质量现状（2026-06-25 v2.4）
+## 数据质量现状（2026-06-26 v2.6）
 
-### unified.db 三表
+### unified.db 四表
 
-| 表       | 总条数 | 发包方   | 金额字段  | 开标时间  |
-|---------|------|--------|--------|--------|
-| tender  | 3728 | ~90% | budget ~85%(jszbcg) | ~90% |
-| award   | 3857 | ~92% | winning_amount ~74% | — |
-| intention | 993 | ~99% | budget ~95% | — |
+| 表 | 总条数 | 发包方 | 金额字段 | 开标时间 |
+|----|------|--------|--------|--------|
+| tender | 3732 | 90% | budget 82% | 90% |
+| award | 3879 | 92% | winning_amount 75% / winner 89% | — |
+| intention | 1128 | 98% | budget 99% | — |
+| other | 3031 | — | — | — |
 
-### 各站关键字段覆盖率（v2.4）
-
-| 站点 | 原始记录 | purchaser | budget | winner | page_path |
-|------|---------|-----------|--------|--------|-----------|
-| jszbcg | 4157 | 90% | 38% | 40% | 92% |
-| yancheng_gov | 2596 | 98% | 44% | 21% | 100% |
-| ycggzy | 4050 | 92% | 43% | 33% | **45%**（修复CDATA后↑） |
-| sufu | 437 | 100% | 100% | 0% | 100% |
-| yueda | 119 | 98% | 4% | **53%**（候选人格式修复后↑） | 99% |
-| 其他7站 | ~850 | 93-100% | 37-75% | 2-50% | 98-100% |
+**project_links/project_chain（v2.6 新增）**
+- tender×award 关联率：68%（2652/3879）
+- 平均招采周期：20天；中标折扣率均值：83.7%
+- 含更正公告链路：22%（581条）
 
 > jszbcg 已覆盖 2026-01-04 至今全年历史
 

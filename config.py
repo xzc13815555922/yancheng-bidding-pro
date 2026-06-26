@@ -78,11 +78,11 @@ SITE_BASELINES = {
     },
     "ycggzy": {
         "count":           3900,
-        "purchaser":       0.90,
-        "budget":          0.65,
+        "purchaser":       0.91,
+        "budget":          0.68,
         "open_date":       0.58,
-        "winner":          0.89,
-        "winning_amount":  0.79,
+        "winner":          0.92,
+        "winning_amount":  0.82,
     },
     "sufu": {
         "count":           190,
@@ -119,10 +119,10 @@ SITE_BASELINES = {
     "dushi": {
         "count":           200,
         "purchaser":       0.92,
-        "budget":          0.62,
-        "open_date":       0.54,
-        "winner":          0.75,
-        "winning_amount":  0.72,
+        "budget":          0.68,
+        "open_date":       0.60,
+        "winner":          0.97,
+        "winning_amount":  0.90,
     },
     "chennan": {
         "count":           180,
@@ -161,7 +161,8 @@ SITE_BASELINES = {
 UNIFIED_BASELINES = {
     "tender":    1300,
     "award":     1300,
-    "intention": 300,
+    "intention": 1000,
+    "other":     1500,
 }
 
 # ── 各字段对应的过滤 notice_type（None = 全量）──

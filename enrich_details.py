@@ -30,6 +30,9 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
 from base import SiteDB, DATA_DIR
+from html_common import parse_datetime as _parse_datetime, parse_date_only as _parse_date_only
+import jszbcg_parser as _jszbcg_parser
+import sufu_parser as _sufu_parser
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -246,42 +249,6 @@ def _parse_amount(raw: str) -> Tuple[Optional[float], str]:
     if m2:
         return float(m2.group(1)), "元"
     return None, "UNKNOWN"
-
-
-def _parse_datetime(raw: str) -> Optional[str]:
-    """尝试将各种日期格式归一化为 'YYYY-MM-DD HH:MM:SS'。"""
-    if not raw:
-        return None
-    raw = re.sub(r'[*_~`]', '', raw)   # 去除 Markdown 强调符号（chennan 等站点常见）
-    raw = re.sub(r'\s+', '', raw)
-    raw = raw.replace('：', ':')        # 全角冒号→半角（chennan "15：00时" 格式）
-    patterns = [
-        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:点](\d{1,2})分?(\d{1,2})?秒?',
-        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})[时:点](\d{1,2})',
-        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})日?(\d{1,2})时',  # H时 without minutes
-        r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})',
-    ]
-    for pat in patterns:
-        m = re.search(pat, raw)
-        if m:
-            g = m.groups()
-            y, mo, d = g[0], g[1], g[2]
-            hh = g[3] if len(g) > 3 and g[3] else "00"
-            mm = g[4] if len(g) > 4 and g[4] else "00"
-            ss = g[5] if len(g) > 5 and g[5] else "00"
-            return f"{int(y):04d}-{int(mo):02d}-{int(d):02d} {int(hh):02d}:{int(mm):02d}:{int(ss):02d}"
-    return None
-
-
-def _parse_date_only(raw: str) -> Optional[str]:
-    """解析日期为 'YYYY-MM-DD'。"""
-    if not raw:
-        return None
-    raw = re.sub(r'\s+', '', raw)
-    m = re.search(r'(\d{4})[年\-/.](\d{1,2})[月\-/.](\d{1,2})', raw)
-    if m:
-        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    return None
 
 
 def parse_html_detail(html: str, notice_type: str) -> Dict:
@@ -660,60 +627,6 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
 
 
 # ─────────────────────────────────────────────
-# 站点特殊处理：直接从 raw_json 提取（无 HTTP）
-# ─────────────────────────────────────────────
-
-def enrich_from_raw_json_jszbcg(raw_json: str, notice_type: str) -> Dict:
-    """jszbcg: 23 列已在 raw_json，直接映射。"""
-    result = {}
-    try:
-        d = json.loads(raw_json)
-    except Exception:
-        return result
-
-    purchaser = d.get("projectCompany") or ""
-    if purchaser:
-        result["purchaser"] = purchaser
-        result["purchaser_raw"] = purchaser
-
-    # openBidTime 是 API 里的"发布时间/接收时间"，不是真正开标时间
-    # 但作为最佳近似，tender 类用它作为 open_date
-    open_bid = d.get("openBidTime") or ""
-    if open_bid and notice_type == "tender":
-        result["open_date"] = _parse_datetime(open_bid)
-
-    # 成交公告（bulletinType=3）：API 里暂无中标单位和中标金额，需要 PDF 解析（暂跳过）
-    return result
-
-
-def enrich_from_raw_json_sufu(raw_json: str, record_row) -> Dict:
-    """苏服采: 迁移时关键字段存入 raw_json，从这里读回。"""
-    result = {}
-    try:
-        d = json.loads(raw_json)
-    except Exception:
-        d = {}
-
-    budget = d.get("budget") or record_row["budget"]
-    if budget and float(budget) > 0:
-        result["budget"] = float(budget)
-        result["budget_unit"] = d.get("budget_unit") or record_row["budget_unit"] or "元"
-
-    deadline = d.get("deadline") or record_row["deadline"]
-    if deadline:
-        result["deadline"] = deadline
-
-    open_dt = d.get("opening_time")
-    if open_dt:
-        result["open_date"] = open_dt
-
-    purchaser = d.get("purchaser") or record_row["purchaser_raw"]
-    if purchaser:
-        result["purchaser"] = purchaser
-    return result
-
-
-# ─────────────────────────────────────────────
 # 主采集 + 更新
 # ─────────────────────────────────────────────
 
@@ -765,7 +678,7 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
 
         # ── 特殊站：从 raw_json 提取，无需 HTTP ──
         if site_key == "jszbcg":
-            fields = enrich_from_raw_json_jszbcg(raw_json, ntype)
+            fields = _jszbcg_parser.enrich_from_raw_json(raw_json, ntype)
             # 若关键字段缺失且有本地 PDF→MD 缓存，降级用 parse_html_detail 补全
             _jszbcg_need_pdf = (
                 not fields.get("purchaser")
@@ -787,7 +700,7 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
                             logger.debug(f"  jszbcg PDF→MD fallback failed: {e}")
 
         elif site_key == "sufu":
-            fields = enrich_from_raw_json_sufu(raw_json, row)
+            fields = _sufu_parser.enrich_from_raw_json(raw_json, row)
 
         # ── HTML 类站：优先读本地缓存 page_path，否则 HTTP 抓 ──
         elif detail_url:
@@ -855,173 +768,7 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
     return {"ok": ok, "fail": fail}
 
 
-# ─────────────────────────────────────────────────────────
-# 单测 (2026-06-25 审计 P1-4/5/6 修复后补充)
-# 用法: python3 -c "from enrich_details import _test_org_suffix, _test_winner_keywords, _test_budget_keywords; _test_org_suffix(); _test_winner_keywords(); _test_budget_keywords()"
-# ─────────────────────────────────────────────────────────
-def _test_org_suffix():
-    """P1-4: 验证 _ORG_SUFFIX 覆盖常见机构后缀。"""
-    pat = re.compile(_ORG_SUFFIX)
-    test_cases = [
-        # 原有覆盖
-        'XX公司', 'XX集团', 'XX医院', 'XX学校', 'XX大学', 'XX研究院',
-        'XX委员会', 'XX管委会', 'XX银行', 'XX服务中心',
-        # 2026-06-25 P1-4 新增 — 抽自 yancheng_gov 17 条 purchaser 缺失样本
-        '阜宁县残疾人联合会（机关）',           # 联合会 (抽样 c4e76fc9)
-        '滨海县红十字会',                       # 红十字会
-        '盐城市大丰区幸福路小学',               # 小学 (抽样 97047fef)
-        '盐城市大丰区南阳中学',                 # 中学 (抽样 c26c2dd2)
-        '盐城市大丰区育红幼儿园',               # 幼儿园
-        '江苏省盐城中学',                       # 中学
-        '盐城市大丰区实验初级中学常新路分校',     # 中学 (抽样 d8e05626)
-        '高新区党工委',                         # 党工委
-        '村委', '居委', '工作站',
-        'XX促进会', 'XX商会', 'XX校友会', 'XX联盟',
-        'XX管理局', 'XX建设处', 'XX工程局',
-        # 负面测试 — 这些不应被错判为机构名
-        '采购人信用承诺书',                     # 不是机构
-        '本项目不接受',                         # 不是机构
-    ]
-    pos_cases = test_cases[:-2]
-    neg_cases = test_cases[-2:]
-    fail = []
-    for name in pos_cases:
-        if not pat.search(name):
-            fail.append(f'ORG_SUFFIX 漏了 {name!r}')
-    for name in neg_cases:
-        if pat.search(name):
-            # 不一定 fail — ORG_SUFFIX 只是一部分, 后面有 _is_valid_purchaser 黑名单拦
-            pass
-    if fail:
-        for f in fail:
-            print(f'  ❌ {f}')
-        raise AssertionError(f'{len(fail)} ORG_SUFFIX 单测失败')
-    print(f'  ✅ _test_org_suffix: {len(pos_cases)} 个机构名全部命中 ORG_SUFFIX')
-
-
-def _test_winner_keywords():
-    """P1-5: 验证 WINNER_KEYWORDS 覆盖常见表格列名。"""
-    # yancheng_gov 中标公告表头 top 5 出现频率:
-    # 序号 2414 | 社会信用代码 2349 | 供应商名称 2348 | 供应商地址 2348 | 中标/成交金额 2093
-    required = {
-        "中标单位", "中标供应商", "成交供应商", "中标人",
-        "中标候选人第一名", "中标候选人", "中标侯选人",
-        "中选人", "中选供应商", "成交人",
-        # 2026-06-25 P1-5 新增
-        "供应商名称", "投标供应商名称", "中标供应商名称", "中标单位名称", "成交供应商名称",
-    }
-    missing = [k for k in required if k not in WINNER_KEYWORDS]
-    if missing:
-        raise AssertionError(f'WINNER_KEYWORDS 漏了 {missing}')
-    print(f'  ✅ _test_winner_keywords: {len(required)} 个关键词全部包含')
-
-
-def _test_budget_keywords():
-    """P1-6: 验证 BUDGET_KEYWORDS 覆盖"采购预算(万元)"等带括号单位变种。"""
-    required = {
-        "项目预算", "采购预算", "控制价", "最高限价", "限价",
-        "总投资", "投资额", "预算金额", "总预算",
-        "项目规模", "服务费", "监理费", "工程造价", "项目造价",
-        "合同估算价", "合同预估金额", "合同预计金额", "合同预计总金额",
-        "估算价", "估算总投资",
-        "标的额", "采购金额", "总服务费", "服务总费用", "总费用",
-        "采购规模", "招标规模", "项目金额", "本次采购金额",
-        "规模", "建设规模", "工程规模",
-        # 2026-06-25 P1-6 新增 — 抽自 yancheng_gov 意向公告表头 1363 次
-        "采购预算(万元)", "项目预算(万元)",
-        "合同预估金额（万元）", "合同预计金额（万元）",
-        "预算金额（万元）", "最高限价(万元)", "招标控制价(万元)",
-    }
-    missing = [k for k in required if k not in BUDGET_KEYWORDS]
-    if missing:
-        raise AssertionError(f'BUDGET_KEYWORDS 漏了 {missing}')
-    print(f'  ✅ _test_budget_keywords: {len(required)} 个关键词全部包含')
-
-
-def _test_budget_exclude():
-    """P1-7: 验证 BUDGET_EXCLUDE 覆盖代理费/服务费等被误匹配为预算的词。"""
-    required = {
-        "保证金", "履约金", "押金", "违约金",
-        # 2026-06-25 P1-7 新增
-        "代理费", "服务费", "中介费", "咨询费", "评审费", "专家费",
-        "手续费", "公证费", "审计费", "律师费", "鉴证费",
-        "招标服务费", "招标代理服务费", "采购代理服务费",
-        "交易服务费", "平台服务费",
-    }
-    missing = [k for k in required if k not in BUDGET_EXCLUDE]
-    if missing:
-        raise AssertionError(f'BUDGET_EXCLUDE 漏了 {missing}')
-    # 验证排除逻辑: 上下文里出现排除词 → 应被识别为不预算
-    test_text_samples = [
-        ("本项目招标代理服务费人民币62700元", True),   # 应排除
-        ("评审专家费共计 5000 元", True),            # 应排除
-        ("采购预算(万元) | 150", False),               # 不应排除
-        ("项目预算 200 万元", False),                 # 不应排除
-    ]
-    for text, should_exclude in test_text_samples:
-        hit = any(ex in text for ex in BUDGET_EXCLUDE)
-        if hit != should_exclude:
-            raise AssertionError(f'BUDGET_EXCLUDE 逻辑错误: {text!r} hit={hit}, 预期 {should_exclude}')
-    print(f'  ✅ _test_budget_exclude: {len(required)} 个排除词全部包含 + 4 个逻辑测试通过')
-
-
-def _test_open_date_keywords():
-    """P2-1: 验证 OPEN_DATE_KEYWORDS 覆盖合并标题格式。"""
-    required = {
-        "开标时间", "开标日期", "开启时间",
-        # 2026-06-25 P2-1 新增
-        "截止时间、开标时间和地点",
-        "递交截止时间、开标时间",
-        "投标截止时间、开标时间",
-        "文件开启时间",
-        "开启日期",
-    }
-    missing = [k for k in required if k not in OPEN_DATE_KEYWORDS]
-    if missing:
-        raise AssertionError(f'OPEN_DATE_KEYWORDS 漏了 {missing}')
-    # 验证合并标题在原文里能被 _extract_after_keyword 找到
-    for kw in ["截止时间、开标时间和地点", "递交截止时间、开标时间", "文件开启时间"]:
-        # kw 本身含中文逗号/,  — 确认 _extract_after_keyword 能处理
-        # 注意: _extract_after_keyword 内部用 re.escape, 含标点也能匹配
-        assert re.search(re.escape(kw), kw), f'kw 自身不匹配: {kw}'
-    print(f'  ✅ _test_open_date_keywords: {len(required)} 个关键词全部包含 + kw 自身能匹配')
-
-
-def _test_budget_kw_split():
-    """P2-3: 验证 budget 关键词'采购预算' + 任意空白 + '(万元)' 拆分型能匹配."""
-    # 抽取 P1-6/P2-3 的拆分型匹配逻辑 (内联)
-    bracket_keywords = [k for k in BUDGET_KEYWORDS if any(c in k for c in '()（）')]
-
-    test_text_samples = [
-        # P2-3 bug 案例: 拆分型 (采购预算 + 空白 + (万元))
-        ('| 采购预算  \n(万元) | 500 | 2026-09 |', '500', '采购预算(万元)'),
-        # 连续型 (P1-6 修复后能跑)
-        ('采购预算(万元) | 150 | 单位:万元', '150', '采购预算(万元)'),
-        # 空格型
-        ('项目预算  \n(万元) | 200 |', '200', '项目预算(万元)'),
-        # 中文括号型
-        ('合同预估金额  \n（万元） | 800 |', '800', '合同预估金额（万元）'),
-    ]
-    fail = []
-    for text, expected_num, kw in test_text_samples:
-        if kw not in bracket_keywords:
-            fail.append(f'kw {kw!r} 不在 BUDGET_KEYWORDS 里')
-            continue
-        m_unit = re.search(r'[（(](\S+?)[）)]', kw)
-        bracket_unit = m_unit.group(1)
-        base = re.sub(r'[（(].*?[）)]', '', kw).strip()
-        pat = re.escape(base) + r'\s*[（(]\s*' + re.escape(bracket_unit) + r'\s*[）)][\s\S]{0,30}?(\d[\d,.]*)'
-        m = re.search(pat, text)
-        if not m:
-            fail.append(f'拆分型未命中: kw={kw!r}, text={text!r}')
-        elif m.group(1) != expected_num:
-            fail.append(f'拆分型数字错: kw={kw!r}, 预期 {expected_num!r} 实际 {m.group(1)!r}')
-
-    if fail:
-        for f in fail:
-            print(f'  ❌ {f}')
-        raise AssertionError(f'{len(fail)} 拆分型单测失败')
-    print(f'  ✅ _test_budget_kw_split: {len(test_text_samples)} 个拆分/连续/中文括号 case 全部正确解析')
+# 单测已迁移至 tests/test_enrich_details.py
 
 
 def enrich_all(dry_run: bool = False):

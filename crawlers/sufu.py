@@ -110,9 +110,7 @@ class SufuCrawlerPro(BaseCrawler):
                 purchaser = re.sub(r"（[^）]{1,6}）$", "", purchaser).strip()
 
                 area_code = str(rec.get("areaCode", ""))
-                detail_url = (
-                    f"https://js.fwgov.cn/biddingResults?id={atype}&serviceType={stype}"
-                )
+                detail_url = f"https://js.fwgov.cn/noticeDetails?id={rec_id}"
 
                 notice = {
                     "id": make_id(proj or rec_id, pub_date, self.SITE_NAME),
