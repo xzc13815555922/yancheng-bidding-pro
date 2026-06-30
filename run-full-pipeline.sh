@@ -145,19 +145,19 @@ path = os.path.join('$PROJ_DIR', 'data', 'unified.db')
 if os.path.exists(path):
     conn = sqlite3.connect(path)
     cur = conn.cursor()
-    for t in ['tender', 'award', 'intention']:
+    for t in ['tender', 'award', 'intention', 'other']:
         cur.execute(f'SELECT COUNT(*) FROM {t}')
         print(f'unified.{t}: {cur.fetchone()[0]}条')
     conn.close()
 "
 
-# 列出本次生成的 3 个 PDF
+# 列出本次生成的 4 个 PDF
 echo ""
 echo "--- 生成的文件 ---"
 ls -lh output/盐开招标公告_$(date +%Y%m).pdf 2>/dev/null && echo "  ✔ 月报PDF"
 ls -lh output/盐开开标倒计时报告_$(date +%Y%m%d).pdf 2>/dev/null && echo "  ✔ 倒计时PDF"
 ls -lh output/盐城通信运营商中标报告_$(date +%Y-%m).pdf 2>/dev/null && echo "  ✔ 运营商月报PDF"
-ls -lh output/盐开采购意向报告_$(date +%Y-%m).pdf 2>/dev/null && echo "  ✔ 采购意向PDF"
+ls -lh output/盐开采购意向报告_$(date +%Y%m).pdf 2>/dev/null && echo "  ✔ 采购意向PDF"
 
 log "日志: $LOG_FILE"
 log "====== 结束 ======"

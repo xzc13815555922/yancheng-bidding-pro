@@ -1,13 +1,14 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/12739条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报（不导出Excel）
+description: 全域盐城招标数据采集（12站/12739条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报 + PDF采购意向报告（不导出Excel）
 outputs:
   - sqlite  # data/unified.db（四张表：tender/award/intention/other + project_links + project_chain视图）
   - sqlite  # data/*.db（12个站点独立数据库）
   - sqlite  # data/tyc.db（天眼查运营商中标数据）
   - pdf     # output/盐开招标公告_YYYYMM.pdf（盐南+经开未分类招标公告月报）
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
-  - pdf     # output/运营商综合月报_YYYYMM.pdf（三源合并：ybp+tyc+obm）
+  - pdf     # output/盐城通信运营商中标报告_YYYY-MM.pdf（三源合并：ybp+tyc+obm）
+  - pdf     # output/盐开采购意向报告_YYYYMM.pdf（盐南+经开采购意向月报）
 version: v2.6
 status: 生产可用
 last_run: 2026-06-30
@@ -20,7 +21,7 @@ records: 12739条原始（12站）→ unified.db tender:3802/award:4035/intentio
 
 ## 概述
 
-采集盐城市 12 个站点的招标/中标/采购意向公告，富化详情页字段，输出 unified.db 三张归一化表 + Excel + PDF报告。
+采集盐城市 12 个站点的招标/中标/采购意向公告，富化详情页字段，输出 unified.db 四张归一化表 + 四份 PDF 报告（不导出 Excel）。
 
 **覆盖站点**：jszbcg（江苏招标采购服务平台）、yancheng_gov（盐城市政府采购网）、ycggzy（盐城市公共资源交易平台）、sufu（苏服务）、yueda（悦达集团阳光采购平台）、dushi（盐城市都市建设投资集团有限公司）、jscn（江苏世纪新城投资控股集团有限公司）、chennan（江苏省盐南高新区公共资源交易电子化服务平台）、dongfang（盐东方产业投资集团有限公司）、bigdata（盐城市大数据集团）、jingkai（盐城经开城市发展投资集团有限公司）、kaifaqu（盐城经济技术开发区行政审批局公共资源交易服务平台）
 
@@ -51,7 +52,7 @@ python3 add_std_district.py
 # 第四步：类别打标（std_category）
 python3 add_std_category.py
 
-# 第五步：生成 unified.db（三张表）
+# 第五步：生成 unified.db（四张表 + project_links + project_chain 视图）
 python3 build_unified.py
 
 # 第六步：数据质量验证
@@ -65,9 +66,12 @@ python3 generate_countdown_report_pdf.py
 
 # 可选：生成运营商综合月报（三源合并）
 python3 generate_operator_combined_report.py --month YYYY-MM
+
+# 可选：生成盐开采购意向报告 PDF
+python3 generate_intention_report.py YYYY-MM
 ```
 
-> ⚠️ **不导出 Excel**：本 skill 输出三份 PDF 即可，Excel 不推送（避免群内刷屏）。`export_excel.py` 仅本地按需手动运行，不进 cron。
+> ⚠️ **不导出 Excel**：本 skill 输出四份 PDF 即可，Excel 不推送（避免群内刷屏）。`export_excel.py` 仅本地按需手动运行，不进 cron。
 
 ## 天眼查采集工作流（**每日自动** + Cookie 失效时手动）
 
@@ -464,7 +468,7 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 |---|------|------|
 | 92 | 05:00 cron 用 `agentTurn` 模式调度 9 步 Python 脚本，agent exec 后长时间无新 model call → 系统判定 stall → 10 分钟后超时 | 新增 `run-full-pipeline.sh` bash 脚本（10 步独立脚本）；cron payload 改为调一行 `bash run-full-pipeline.sh`；timeout 1800s → 3600s |
 
-**验证**：手动跑 4 分钟完成全流程（含天眼查 + 12站 + 3 份 PDF）。原 6/24 05:00 cron 10 分钟超时问题根治。
+**验证**：手动跑 4 分钟完成全流程（含天眼查 + 12站 + 4 份 PDF）。原 6/24 05:00 cron 10 分钟超时问题根治。
 
 ### tyc_crawler 提速 10 倍（修复 #93）
 
@@ -480,15 +484,15 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 |---|------|------|
 | 94a | `SKILL.md` | outputs 移除 excel；流程示例删除 `export_excel.py` 步骤；加⚠️ 说明「不导出 Excel」 |
 | 94b | `run-full-pipeline.sh` | 移除 `[Extra] export_excel.py` 步骤 |
-| 94c | cron job `f605317e-...` | 08:30 推送移除 Excel，只推 3 份 PDF |
+| 94c | cron job `f605317e-...` | 08:30 推送移除 Excel，只推 3 份 PDF（后续升级为 4 份） |
 
 **说明**：`export_excel.py` 脚本保留，需要时手动运行即可，不进生产流程。
 
-### 修复后 cron 任务清单
+### 修复后 cron 任务清单（当前状态）
 
 | cron 时间 | 任务 | 调用的脚本 | 超时 |
 |---------|------|-----------|------|
 | 05:00 全流程 | `yancheng-bidding-pro daily 5:00 full pipeline` | `bash run-full-pipeline.sh` | 3600s |
-| 08:30 推送 | `yancheng-bidding-pro push 3 PDFs to feishu group 8:30` | openclaw message send ×3 | 600s |
+| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.4)` | openclaw message send ×4（含预检探测 + 失败重试） | 1800s |
 
-**预期耗时**：05:00 cron 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 报告生成 <1min）。08:30 推送 ≈ 30 秒（3 次 openclaw message send）。
+**预期耗时**：05:00 cron 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 2-3 分钟（channel-info 预检 + 4次 send，失败 sleep 30s 重试 1 次）。
