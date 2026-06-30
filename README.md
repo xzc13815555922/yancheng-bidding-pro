@@ -2,7 +2,7 @@
 
 盐城市 12 个招标网站的数据采集、富化、分类和报告生成系统。
 
-**当前版本**：v2.6 | **数据量**：12365条原始 → unified.db 四表合计 11770 | **最后更新**：2026-06-26
+**当前版本**：v2.6 | **数据量**：12739条原始 → unified.db 四表合计 12129 | **最后更新**：2026-06-30
 
 > **v2.6 变更说明（2026-06-26）**：① unified.db 新增第四张表 `other`（流标/终止/更正/合同，3031条）及 `project_links` 关联表（tender×award，2652条68%覆盖），新增 `project_chain` 视图 ② `enrich_details.py` 解耦（1082→829行，per-site 解析器迁到 `crawlers/jszbcg_parser.py` / `crawlers/sufu_parser.py`，测试迁到 `tests/`）③ `enrich_amendment_opendate.py` 新增 jszbcg `【更正公告】` 前缀剥离 ④ 新增 `reenrich.py`（补全统一入口）、`report_failed_bids.py`（流标报告）、`expand_intention.py`（批次意向展开）。
 
@@ -23,21 +23,21 @@
 | bigdata | 盐城市大数据集团 | HTML 详情页 |
 | jingkai | 盐城经开城市发展投资集团有限公司 | HTML 详情页 |
 
-## 数据质量（2026-06-26 v2.6）
+## 数据质量（2026-06-30 v2.6）
 
 ### unified.db 四表
 
 | 表 | 总数 | 发包方 | 金额 | 开标时间 |
 |----|------|--------|------|--------|
-| tender（招标公告） | 3732 | 90% | 82% | 90% |
-| award（中标成交） | 3879 | 92% | 75% | — |
-| intention（采购意向） | 1128 | 98% | 99% | — |
-| other（流标/终止/更正/合同） | 3031 | — | — | — |
+| tender（招标公告） | 3802 | 90% | 81% | 90% |
+| award（中标成交） | 4035 | 92% | 75% | — |
+| intention（采购意向） | 1143 | 98% | 99% | — |
+| other（流标/终止/更正/合同） | 3149 | — | — | — |
 
 | 表/字段 | 覆盖率 | 说明 |
 |---------|--------|------|
-| award.winner | 89% | sufu 结构性0%（SPA 需登录） |
-| project_links | 68% | tender×award 关联（2652条），project_chain 视图 |
+| award.winner | 87% | sufu 结构性0%（SPA 需登录） |
+| project_links | 67% | tender×award 关联（2723条），project_chain 视图 |
 | std_district | ~98% | 区县标准化 |
 | std_category | ~42% | YAML 规则库，持续扩充 |
 
@@ -379,7 +379,7 @@ python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 
 | 指标 | 数值 |
 |------|------|
-| tender×award 关联率 | 68%（2652/3879） |
+| tender×award 关联率 | 67%（2723/4035） |
 | 平均招采周期 | 20 天 |
 | 平均中标折扣率 | 83.7%（预算>1万，ratio 0.3~1.5 样本） |
-| 含更正公告的链路 | 22%（581条，平均1.8次更正）|
+| 含更正公告的链路 | 22%（598条，平均1.8次更正）|

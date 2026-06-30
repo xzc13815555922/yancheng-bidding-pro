@@ -1,6 +1,6 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/12365条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报（不导出Excel）
+description: 全域盐城招标数据采集（12站/12739条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报（不导出Excel）
 outputs:
   - sqlite  # data/unified.db（四张表：tender/award/intention/other + project_links + project_chain视图）
   - sqlite  # data/*.db（12个站点独立数据库）
@@ -10,8 +10,8 @@ outputs:
   - pdf     # output/运营商综合月报_YYYYMM.pdf（三源合并：ybp+tyc+obm）
 version: v2.6
 status: 生产可用
-last_run: 2026-06-26
-records: 12365条原始（12站）→ unified.db tender:3732/award:3879/intention:1128/other:3031；project_links:2652条(68%覆盖)
+last_run: 2026-06-30
+records: 12739条原始（12站）→ unified.db tender:3802/award:4035/intention:1143/other:3149；project_links:2723条(67%覆盖)
 
 > **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
 ---
@@ -155,15 +155,15 @@ python3 enrich_yancheng_gov.py
 
 | 表 | 总条数 | 发包方 | 金额字段 | 开标时间 |
 |----|------|--------|--------|--------|
-| tender | 3732 | 90% | budget 82% | 90% |
-| award | 3879 | 92% | winning_amount 75% / winner 89% | — |
-| intention | 1128 | 98% | budget 99% | — |
-| other | 3031 | — | — | — |
+| tender | 3802 | 90% | budget 81% | 90% |
+| award | 4035 | 92% | winning_amount 75% / winner 87% | — |
+| intention | 1143 | 98% | budget 99% | — |
+| other | 3149 | — | — | — |
 
 **project_links/project_chain（v2.6 新增）**
-- tender×award 关联率：68%（2652/3879）
+- tender×award 关联率：67%（2723/4035）
 - 平均招采周期：20天；中标折扣率均值：83.7%
-- 含更正公告链路：22%（581条）
+- 含更正公告链路：22%（598条）
 
 > jszbcg 已覆盖 2026-01-04 至今全年历史
 
