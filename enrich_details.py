@@ -431,7 +431,11 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         has_unit = bool(re.search(r'[万元亿]', chunk))
         if amount and amount > 0 and has_unit and 100 <= amount <= 5e10:
             # 过滤文件工本费/单价误提取（jszbcg常见："500元/套""225元/吨""售后不退"）
-            if re.search(r'/[吨套件个平米㎡月年天]|售后不退|工本费|文件费|汇款账', chunk):
+            # 2026-07-06 P4: 修正 "X万元/年" / "X万元/月" (年/月付款合同额) 被误判为单价
+            # 只过滤 "X元/Y" (真实单价, Y 是吨套件个平), 不过滤 "X万元/年"
+            if re.search(r'\d+\.?\d*\s*元[/.](?:吨|套|件|个|平米|㎡|份|台|只|张|本|块)', chunk):
+                continue
+            if re.search(r'售后不退|工本费|文件费|汇款账', chunk):
                 continue
             result["budget"] = amount
             result["budget_unit"] = unit
