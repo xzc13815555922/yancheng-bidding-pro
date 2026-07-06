@@ -14,6 +14,7 @@ status: 生产可用
 last_run: 2026-06-30
 records: 12739条原始（12站）→ unified.db tender:3802/award:4035/intention:1143/other:3149；project_links:2723条(67%覆盖)
 
+> **v2.7 变更（2026-07-06）**：① P0 重复入库修复（tyc/yancheng_gov UNIQUE INDEX + make_id 去「采购包N」后缀）② P0 运营商报告金额单位 `*10000` 修复 ③ 飞书推送 cron v2.4→v2.6 升级 ④ 中小微企业专题（tender/intention 加 sme_target 列 + 报表加列） ⑤ P0 批次标题误作项目名修复（_json 嵌套 import + 单项目也用子项 name + extract_sme_target _URL_INDEX） ⑥ P4 enrich_details 高可信预算词优先 ⑦ P5 enrich_details 单位过滤修正（X万元/年不再被误判） ⑧ P6 enrich_details 全面优化（jszbcg 4 种资金来源 + OCR「米源」容错 + _parse_amount safe_float 防护 + tyc.notices UNIQUE INDEX 补齐）。详细见本 SKILL.md 「本轮修复清单（v2.5 → v2.6，2026-07-06）」section。
 > **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
 ---
 
@@ -248,6 +249,47 @@ python3 enrich_yancheng_gov.py
 | 111 | `generate_intention_report.py` | 清单表加列「中小微」同样三色标记 | PDF 文本含「中小微」列 ✓ |
 
 **准确率验证**：随机抽 5 条「专门面向」 + 3 条「非专门但优惠」核对原文，均 100% 正确（关键词 + 上下文匹配）。
+
+### P4：enrich_details 高可信预算词优先（项目总投资不被「服务费」误杀）
+
+**问题**：原文「项目规模：…预估项目总投资300万元，本次招标项目服务费约5万元」中，`项目规模`（普通预算词）先匹配 chunk，BUDGET_EXCLUDE 检查命中「服务费」导致 continue 跳过；真正高可信词「项目总投资」永远没机会跑。
+
+| # | 位置 | 改动 |
+|---|------|------|
+| 112 | `enrich_details.py:50-67` | 新增 `PRECISE_BUDGET_KEYWORDS` 列表（项目总投资/预估总投资/总投资额/计划总投资/项目预算金额） |
+| 113 | `enrich_details.py:372-389` | 新增 `_PRECISE_RE` 优先匹配；命中后跳过 EXCLUDE 检查（高可信词不需要过滤）|
+| 114 | `data/bigdata.db` `0f409e33` | 大数据集团「标段二 (二次) 招标公告」budget 300万 ✓ |
+
+### P5：enrich_details 单位过滤修正（X万元/年 不被误判为单价）
+
+**问题**：原文「维保费用约90万元/年」被旧 pattern `/[月年]/` 误判为单价 → continue 跳过 → budget = None。
+
+| # | 位置 | 改动 |
+|---|------|------|
+| 115 | `enrich_details.py:434-441` | 单位过滤改为 `\d+\.?\d*\s*元[/.](吨|套|件|个|平米|㎡|份|台|只|张|本|块)`，**只拒绝真实单价** (X元/Y) |
+| 116 | `data/chennan.db` `6ff7ee91` | 奥体中心「维保费用约90万元/年」budget 90万 ✓ |
+
+### P6：enrich_details 全面优化（jszbcg 资金来源 4 种 + OCR 容错 + 解析崩溃防护）
+
+**问题**：扫全 DB 后仍有 857 个 tender.budget=NULL（覆盖率 74.4%），多数 jszbcg 公告未解出。
+
+| # | 位置 | 改动 |
+|---|------|------|
+| 117 | `enrich_details.py:58-72` | BUDGET_KEYWORDS 加 11 个：4 种资金来源（其他/自筹/国有/私有）+ 「项目资金米源」（OCR 错别字容错）+ 「预算：人民币」+ 「起始价」+ 「建设资金来自」 |
+| 118 | `enrich_details.py:246-281` | `_parse_amount` 加 `safe_float()` 包装，防 jszbcg 数字「93.192.6」含多个 `.` 让 `float()` 崩溃 |
+| 119 | `crawlers/tyc_crawler.py` | `init_db` 加 `CREATE UNIQUE INDEX idx_tyc_notices_detail_url`（tyc 走 base.py schema 但不走 BaseCrawler，需手动建索引） |
+
+**P6 修复实测数据**：
+- 修复前：857/3983 (74.4%) tender 有 budget
+- 修复后：3521/3983 (88.4%) tender 有 budget（多修 401 个）
+- 3 轮批量 enrich 修复统计：157 + 152 + 92 = 401 个
+- 剩余 462 个 budget=null：126 无 MD 文件 + 83 含万元未解（边缘格式）+ 253 真无万元关键词（无预算概念）
+
+### P5 教训 (2026-07-06 18:50): enrich 修复后必须重生成全部 4 份 PDF
+
+详见 SKILL.md 第555行下方。
+
+
 
 ## 本轮修复清单（v2.3 → v2.4，2026-06-25）
 
@@ -566,3 +608,7 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 - [ ] 4 份 PDF 全部 `python3 generate_*.py` 重生成
 - [ ] pypdf 读 PDF 文本确认含预期金额
 - [ ] 4 份 push 到群 + CEO 私发
+
+(详细 P0 批次标题修复见上面 "P0 修复（2026-07-06）：采购意向批次标题误当项目名" section)
+
+

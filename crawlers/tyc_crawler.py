@@ -110,6 +110,9 @@ def init_db(conn: sqlite3.Connection):
     CREATE INDEX IF NOT EXISTS idx_tyc_loc     ON tyc_awards(project_location);
     -- P1-2026-07-06: 加 detail_url 唯一索引，兑底防止同一公告重复入库
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tyc_detail_url ON tyc_awards(detail_url) WHERE detail_url IS NOT NULL;
+    -- P1-2026-07-06 (补齐): tyc.db 也用 base.py schema 的 notices 表, UNIQUE INDEX 必须在 tyc_crawler init_db 里也建
+    -- (因为 tyc 不走 BaseCrawler, 不会自动调 base.init_db)
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tyc_notices_detail_url ON notices(detail_url) WHERE detail_url IS NOT NULL;
     """)
     conn.commit()
 
