@@ -1,5 +1,6 @@
 # 数据文件（本地采集，不入库）
 data/*.db
+data/
 data/pdfs/
 data/pages/
 data/cookies.json
@@ -19,3 +20,10 @@ venv/
 
 # macOS
 .DS_Store
+
+# 本轮新增: 防止误传大文件/本地缓存
+data/backup/
+output/*.pdf
+output/
+output/*.docx
+tmp_*.py
