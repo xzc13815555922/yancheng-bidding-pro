@@ -234,6 +234,28 @@ def _norm_award_name(name: str) -> str:
     return n
 
 
+def _dedup_tenders(tenders: list) -> tuple[list, int]:
+    """P1-2026-07-06: tender 表去重。跨站点可能出现同 detail_url+date 重复
+    （如 yancheng_gov 同一天多次采集）。按 (detail_url, publish_date) 去重。"""
+    from collections import defaultdict
+    groups: dict = defaultdict(list)
+    for rec in tenders:
+        # tender 表第 12 列是 detail_url，第 6 列是 publish_date
+        key = (rec[11], rec[5])
+        groups[key].append(rec)
+
+    result = []
+    dropped = 0
+    for recs in groups.values():
+        if len(recs) == 1:
+            result.append(recs[0])
+        else:
+            # 同 detail_url + 同 date 取任意一条（业务上同源记录）
+            result.append(recs[0])
+            dropped += len(recs) - 1
+    return result, dropped
+
+
 def _award_score(rec: tuple) -> int:
     """字段完整度评分：无采购包后缀(+4) + winner(+2) + winning_amount(+1)。"""
     name   = rec[6] or ""
@@ -285,15 +307,17 @@ def build():
 
     for site in SITES:
         tenders, awards, intentions, others = load_site(DATA_DIR / f"{site}.db")
-        uconn.executemany("INSERT OR REPLACE INTO tender VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", tenders)
+        # P1-2026-07-06: 站点内 tender 按 (detail_url, publish_date) 去重
+        deduped_site_tenders, _ = _dedup_tenders(tenders)
+        uconn.executemany("INSERT OR REPLACE INTO tender VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", deduped_site_tenders)
         uconn.executemany("INSERT OR REPLACE INTO intention VALUES (?,?,?,?,?,?,?,?,?,?,?)", intentions)
         uconn.executemany("INSERT OR REPLACE INTO other VALUES (?,?,?,?,?,?,?,?,?,?)", others)
         uconn.commit()
         all_awards.extend(awards)
-        total_t += len(tenders)
+        total_t += len(deduped_site_tenders)
         total_i += len(intentions)
         total_o += len(others)
-        print(f"[{site:<12}] tender:{len(tenders):4}  award:{len(awards):4}  intention:{len(intentions):3}  other:{len(others):4}")
+        print(f"[{site:<12}] tender:{len(deduped_site_tenders):4}  award:{len(awards):4}  intention:{len(intentions):3}  other:{len(others):4}")
 
     deduped_awards, dropped = _dedup_awards(all_awards)
     uconn.executemany("INSERT OR REPLACE INTO award VALUES (?,?,?,?,?,?,?,?,?,?,?)", deduped_awards)

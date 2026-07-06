@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +65,8 @@ class SiteDB:
     CREATE INDEX IF NOT EXISTS idx_region       ON notices(region);
     CREATE INDEX IF NOT EXISTS idx_detail       ON notices(detail_fetched);
     CREATE INDEX IF NOT EXISTS idx_site         ON notices(site);
+    -- P1-2026-07-06: detail_url 唯一索引，兑底防止同公告重复入库（项目名 '采购包N' 问题）
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_notices_detail_url ON notices(detail_url) WHERE detail_url IS NOT NULL;
     """
 
     def __init__(self, site_key: str):
@@ -208,7 +211,13 @@ class SiteDB:
 
 
 def make_id(project_name: str, publish_date: str, site: str) -> str:
-    raw = f"{project_name}|{publish_date}|{site}"
+    """生成唯一 ID。修复 P1-2026-07-06：上游某些站点会把同一项目的'主公告'和
+    '采购包N'公告分别发布，导致 project_name 尾部带'采购包N'的两条记录
+    ID 不同而被重复入库。现对 project_name 去掉尾部后缀再哈希。
+    受益站点：ycggzy、yancheng_gov 等。tyc 爬虫另外有自己的 make_id（已在 7/6 同步修复）。"""
+    base_name = re.sub(r'(采购包\s*\d+\s*)$', '', project_name or '').strip()
+    # 防 None/空: 加 site 字段保底，但本身仍会冲突。调用方应过滤空 project_name。
+    raw = f"{base_name or '_empty_'}|{publish_date or ''}|{site}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 

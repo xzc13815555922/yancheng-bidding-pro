@@ -108,6 +108,8 @@ def init_db(conn: sqlite3.Connection):
     CREATE INDEX IF NOT EXISTS idx_tyc_date    ON tyc_awards(publish_date);
     CREATE INDEX IF NOT EXISTS idx_tyc_company ON tyc_awards(company_short);
     CREATE INDEX IF NOT EXISTS idx_tyc_loc     ON tyc_awards(project_location);
+    -- P1-2026-07-06: 加 detail_url 唯一索引，兑底防止同一公告重复入库
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tyc_detail_url ON tyc_awards(detail_url) WHERE detail_url IS NOT NULL;
     """)
     conn.commit()
 
@@ -222,7 +224,11 @@ def parse_amount(text: str):
 
 
 def make_id(project_name: str, publish_date: str, procuring_entity: str) -> str:
-    raw = f"{project_name}|{publish_date}|{procuring_entity or ''}"
+    """生成唯一 ID。修复 P1-2026-07-06：天眼查把同一项目的'主公告'和'采购包N'公告
+    分别发布（不同 detail_id），原逻辑用 project_name 生成 ID 会导致两条都入库。
+    现对 project_name 去掉尾部 '采购包N' 后缀再哈希。"""
+    base_name = re.sub(r'(采购包\s*\d+\s*)$', '', project_name or '').strip()
+    raw = f"{base_name or '_empty_'}|{publish_date or ''}|{procuring_entity or ''}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
