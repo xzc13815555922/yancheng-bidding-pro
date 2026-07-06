@@ -236,7 +236,16 @@ python3 enrich_yancheng_gov.py
 
 **实锤证据**：v2.6 cron run（2026-07-06 16:19）4 份 PDF 全部一次推送成功，messageId `om_x100b6b821e70a4a0b1dae01db6d9f4f` 等 4 条 `openclaw message read --message-id` 全部 `ok: true`。
 
----
+### P1：中小微企业专题（v2.6 → v2.7，2026-07-06 CEO 拍板）
+
+| # | 位置 | 改动 | 验证 |
+|---|------|------|------|
+| 108 | `extract_sme_target.py`（新增 200 行） | 从 `data/pages/{site}/*.md` 缓存全文提取 3 类标签：`专门面向` / `非专门但优惠` / `不涉及`；排除「十、附件」模板段 | 抽 8 条人工核对准确率 100% |
+| 109 | `data/unified.db` | `tender` + `intention` 表加 `sme_target` 列（TEXT） | 551 条 (13.8%) tender 有中小微政策（445 专门 + 106 优惠）|
+| 110 | `generate_tender_report.py` | 第 1 页加「中小微企业专题（本月）」统计块（专门=绿/优惠=橙/不涉及=灰）；清单加列「中小微政策」专门面向项目用绿色●标记 | PDF 文本含「● 专门面向」标记 ✓ |
+| 111 | `generate_intention_report.py` | 第 1 页加「中小微企业商机预警」说明 | PDF 文本含「商机预警」字样 ✓ |
+
+**准确率验证**：随机抽 5 条「专门面向」 + 3 条「非专门但优惠」核对原文，均 100% 正确（关键词 + 上下文匹配）。
 
 ## 本轮修复清单（v2.3 → v2.4，2026-06-25）
 

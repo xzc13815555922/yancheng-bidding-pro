@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 盐开招标公告月报生成器
-数据源：data/unified.db -> tender 表，std_district IN ('盐南','经开')
-用法：python3 generate_tender_report.py [YYYY-MM]   默认当月
+数据源:data/unified.db -> tender 表,std_district IN ('盐南','经开')
+用法:python3 generate_tender_report.py [YYYY-MM]   默认当月
 """
 
 import os, sys, re, sqlite3
@@ -43,18 +43,18 @@ SITE_ORDER = [
 ]
 
 SITE_FILTER = {
-    "盐城市政府采购网":                      "区域关键词筛选（盐南高新区、经开区）",
-    "苏服务":                               "选择区域（经开区、盐南高新区）",
-    "江苏省盐南高新区公共资源交易电子化服务平台": "全量采集（盐南高新区专属平台）",
-    "盐城经济技术开发区行政审批局公共资源交易服务平台": "全量采集（经开区专属平台）",
+    "盐城市政府采购网":                      "区域关键词筛选(盐南高新区、经开区)",
+    "苏服务":                               "选择区域(经开区、盐南高新区)",
+    "江苏省盐南高新区公共资源交易电子化服务平台": "全量采集(盐南高新区专属平台)",
+    "盐城经济技术开发区行政审批局公共资源交易服务平台": "全量采集(经开区专属平台)",
     "盐城市公共资源交易平台":               "areaCode=320971(盐南)/320941(经开)分类接口",
-    "盐城市大数据集团":                     "全量采集（盐南高新区大数据产业集团）",
-    "盐城市都市建设投资集团有限公司":       "全量采集（盐南高新区都市集团）",
-    "盐东方产业投资集团有限公司":           "全量采集（经开区东方集团）",
-    "江苏世纪新城投资控股集团有限公司":     "全量采集（盐南高新区城南集团）",
-    "盐城经开城市发展投资集团有限公司":      "全量采集（经开区城发平台）",
-    "悦达集团阳光采购平台":                 "关键词筛选；排除横山/雅海项目",
-    "江苏招标采购服务平台":                 "全域盐城（purchaser含盐南/经开关键词筛选）",
+    "盐城市大数据集团":                     "全量采集(盐南高新区大数据产业集团)",
+    "盐城市都市建设投资集团有限公司":       "全量采集(盐南高新区都市集团)",
+    "盐东方产业投资集团有限公司":           "全量采集(经开区东方集团)",
+    "江苏世纪新城投资控股集团有限公司":     "全量采集(盐南高新区城南集团)",
+    "盐城经开城市发展投资集团有限公司":      "全量采集(经开区城发平台)",
+    "悦达集团阳光采购平台":                 "关键词筛选;排除横山/雅海项目",
+    "江苏招标采购服务平台":                 "全域盐城(purchaser含盐南/经开关键词筛选)",
 }
 
 DARK_BLUE  = colors.HexColor("#1f4e79")
@@ -78,7 +78,7 @@ def _register_font() -> str:
 
 def _fmt_amount(budget: Optional[float]) -> str:
     if budget is None:
-        return "—"
+        return "-"
     wan = budget / 10_000
     if wan >= 10000:
         return f"{wan/10000:.2f}亿"
@@ -115,10 +115,11 @@ def site_count_unclassified(site: str, date: str) -> int:
 
 
 def month_records(first: str, last: str) -> List[dict]:
-    """当月全量（含分类/未分类），用于汇总统计"""
+    """当月全量(含分类/未分类),用于汇总统计"""
     return _query(
         "SELECT site_name, publish_date, project_name, purchaser, "
-        "budget, open_date, detail_url, proj_major_cat, proj_minor_cat "
+        "budget, open_date, detail_url, proj_major_cat, proj_minor_cat, "
+        "sme_target "
         "FROM tender "
         "WHERE std_district IN ('盐南','经开') "
         "  AND publish_date BETWEEN ? AND ? "
@@ -131,7 +132,7 @@ def month_records(first: str, last: str) -> List[dict]:
 
 def page1_summary(f: str, report_month: str, first: str, last: str,
                   today: str, yesterday: str, all_records: List[dict]) -> list:
-    """第1页：招标公告汇总表"""
+    """第1页:招标公告汇总表"""
     story = []
 
     t1 = _style(f, "T1", parent="Heading1", fontSize=20, textColor=DARK_BLUE,
@@ -141,11 +142,11 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
 
     story.append(Paragraph("盐开招标公告月报", t1))
     story.append(Paragraph(
-        f"{report_month}　　统计范围：{first} 至 {last}　　"
-        f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"{report_month}  统计范围:{first} 至 {last}  "
+        f"生成时间:{datetime.now().strftime('%Y-%m-%d %H:%M')}",
         t2
     ))
-    # P0-2 警告已于 2026-06-25 移除（reenrich_jszbcg_open_date.py 已修负 1683 条 open_date 从 openBidTime→真开标时间）
+    # P0-2 警告已于 2026-06-25 移除(reenrich_jszbcg_open_date.py 已修负 1683 条 open_date 从 openBidTime→真开标时间)
 
     h  = _style(f, "SH",  fontSize=8.5, alignment=TA_CENTER,
                 textColor=colors.white, leading=12)
@@ -181,21 +182,21 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
         total_unc += unc
         total_cls += cls
 
-        td_yd_str = f"{td} / {yd}" if (td or yd) else "—"
+        td_yd_str = f"{td} / {yd}" if (td or yd) else "-"
         tbl_data.append([
             Paragraph(site, _style(f, f"sn{site}", fontSize=9, alignment=TA_LEFT, leading=12)),
             Paragraph(td_yd_str, cv),
-            Paragraph(str(unc) if unc else "—", cv),
-            Paragraph(str(cls) if cls else "—", cv),
-            Paragraph(SITE_FILTER.get(site, "—"), cl),
+            Paragraph(str(unc) if unc else "-", cv),
+            Paragraph(str(cls) if cls else "-", cv),
+            Paragraph(SITE_FILTER.get(site, "-"), cl),
         ])
 
     tbl_data.append([
         Paragraph("合计", _style(f, "tot", fontSize=9, alignment=TA_CENTER, leading=12)),
-        Paragraph(f"{total_td} / {total_yd}" if (total_td or total_yd) else "—", cv),
-        Paragraph(str(total_unc) if total_unc else "—", cv),
-        Paragraph(str(total_cls) if total_cls else "—", cv),
-        Paragraph("—", cv),
+        Paragraph(f"{total_td} / {total_yd}" if (total_td or total_yd) else "-", cv),
+        Paragraph(str(total_unc) if total_unc else "-", cv),
+        Paragraph(str(total_cls) if total_cls else "-", cv),
+        Paragraph("-", cv),
     ])
 
     tbl = Table(tbl_data, colWidths=[3.5*cm, 2.8*cm, 2.3*cm, 2.3*cm, 6.6*cm], repeatRows=1)
@@ -215,12 +216,65 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
     note = _style(f, "NOTE", fontSize=8.5, textColor=colors.HexColor("#444444"),
                   leading=13, spaceBefore=0.35*cm)
     story.append(Paragraph(
-        '【分类说明】”非相关招标”指已通过关键词规则归类为与公司业务无关的项目'
-        '（如：建设工程、物业服务、法律服务、车辆采购、IT设备、'
-        '设计服务、垃圾与环卫、电梯服务等），仅作统计留存，不进入商机池。'
-        '”重点招标”为尚未归类、需人工研判的潜在商机，明细清单页逐网站展示。',
+        '【分类说明】"非相关招标"指已通过关键词规则归类为与公司业务无关的项目'
+        '(如:建设工程、物业服务、法律服务、车辆采购、IT设备、'
+        '设计服务、垃圾与环卫、电梯服务等),仅作统计留存,不进入商机池。'
+        '"重点招标"为尚未归类、需人工研判的潜在商机,明细清单页逐网站展示。',
         note
     ))
+
+    # ============ P1-2026-07-06: 中小微专题统计 (本月中标公告中面向中小微政策) ============
+    sme_rows = _query(
+        "SELECT sme_target, COUNT(*) AS n FROM tender "
+        "WHERE std_district IN ('盐南','经开') "
+        "  AND publish_date BETWEEN ? AND ? "
+        "GROUP BY sme_target",
+        (first, last)
+    )
+    sme_dict = {r['sme_target']: r['n'] for r in sme_rows}
+    sme_total = sum(sme_dict.values())
+    if sme_total > 0:
+        story.append(Paragraph("▌ 中小微企业专题(本月)", sec2 := _style(f, "SME_H", fontSize=12, textColor=DARK_BLUE, spaceAfter=0.2*cm, spaceBefore=0.35*cm)))
+        sme_tbl = [[
+            Paragraph("中小微政策类型", h),
+            Paragraph("当月项目数", h),
+            Paragraph("占比", h),
+            Paragraph("说明", h),
+        ]]
+        sme_legend = [
+            ("专门面向", colors.HexColor("#2e7d32"), "项目只接受中小微企业投标(需提供《中小企业声明函》)"),
+            ("非专门但优惠", colors.HexColor("#f57c00"), "不限资质,中小微报价给予 10-20% 价格扣除"),
+            ("不涉及", colors.HexColor("#9e9e9e"), "未提中小微相关政策"),
+        ]
+        for label, color, desc in sme_legend:
+            n = sme_dict.get(label, 0)
+            pct = f"{n*100/sme_total:.1f}%" if sme_total else "-"
+            sme_tbl.append([
+                Paragraph(f"<font color='{color.hexval()}'>●</font> {label}", _style(f, f"sl{label}", fontSize=9, alignment=TA_LEFT, leading=12)),
+                Paragraph(str(n) if n else "-", cv),
+                Paragraph(pct, cv),
+                Paragraph(desc, _style(f, f"sd{label}", fontSize=8, alignment=TA_LEFT, leading=11)),
+            ])
+        sme_tbl.append([
+            Paragraph("合计", _style(f, "sme_tot", fontSize=9, alignment=TA_CENTER, leading=12)),
+            Paragraph(str(sme_total), cv),
+            Paragraph("100.0%", cv),
+            Paragraph("-", cv),
+        ])
+        sme_table = Table(sme_tbl, colWidths=[3.5*cm, 2.3*cm, 2.0*cm, 9.7*cm], repeatRows=1)
+        sme_table.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0),  (-1, 0),  DARK_BLUE),
+            ("BACKGROUND",    (0, -1), (-1, -1), LIGHT_BLUE),
+            ("ROWBACKGROUNDS",(0, 1),  (-1, -2), [colors.white, ROW_ALT]),
+            ("GRID",          (0, 0),  (-1, -1), 0.3, colors.grey),
+            ("VALIGN",        (0, 0),  (-1, -1), "MIDDLE"),
+            ("TOPPADDING",    (0, 0),  (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0),  (-1, -1), 4),
+            ("LEFTPADDING",   (0, 0),  (-1, -1), 5),
+            ("RIGHTPADDING",  (0, 0),  (-1, -1), 4),
+        ]))
+        story.append(sme_table)
+
     return story
 
 
@@ -228,11 +282,11 @@ LARGE_SITE_THRESHOLD = 8  # 记录数 >= 此值则单独占一页
 
 
 def _site_section(f: str, site: str, rows: List[dict]) -> list:
-    """渲染单个网站的标题 + 清单（或暂无提示）"""
+    """渲染单个网站的标题 + 清单(或暂无提示)"""
     items = []
     sec = _style(f, f"sec{site}", fontSize=12, textColor=DARK_BLUE,
                  spaceAfter=0.2*cm, spaceBefore=0.25*cm)
-    items.append(Paragraph(f"▌ {site}　重点招标清单（共{len(rows)}条）", sec))
+    items.append(Paragraph(f"▌ {site} 重点招标清单(共{len(rows)}条)", sec))
 
     if not rows:
         empty = _style(f, f"emp{site}", fontSize=9,
@@ -249,31 +303,42 @@ def _site_section(f: str, site: str, rows: List[dict]) -> list:
         Paragraph("项目名称", h),
         Paragraph("发布日期", h),
         Paragraph("发包人", h),
-        Paragraph("项目金额\n（万元）", h),
+        Paragraph("项目金额\n(万元)", h),
         Paragraph("开标时间", h),
+        Paragraph("中小微政策", h),
         Paragraph("链接", h),
     ]]
     for r in rows:
-        name = re.sub(r'^【[^】]{2,10}】', '', r["project_name"] or "").strip() or r["project_name"] or "—"
+        name = re.sub(r'^【[^】]{2,10}】', '', r["project_name"] or "").strip() or r["project_name"] or "-"
         url  = r["detail_url"] or ""
         link_cell = (
             Paragraph(f"<link href='{url}' color='blue'><u>详情</u></link>", lnk)
-            if url else Paragraph("—", cc)
+            if url else Paragraph("-", cc)
         )
-        pub_dt  = (r["publish_date"] or "")[:10] or "—"
-        open_dt = (r["open_date"] or "")[:10] or "—"
+        pub_dt  = (r["publish_date"] or "")[:10] or "-"
+        open_dt = (r["open_date"] or "")[:10] or "-"
+        sme = r.get("sme_target") or "不涉及"
+        if sme == "专门面向":
+            sme_cell = Paragraph("<font color='#2e7d32'><b>● 专门面向</b></font>",
+                _style(f, f"sme1{site}", fontSize=7.5, alignment=TA_CENTER, leading=10))
+        elif sme == "非专门但优惠":
+            sme_cell = Paragraph("<font color='#f57c00'><b>● 优惠</b></font>",
+                _style(f, f"sme2{site}", fontSize=7.5, alignment=TA_CENTER, leading=10))
+        else:
+            sme_cell = Paragraph("", _style(f, f"sme3{site}", fontSize=7.5, alignment=TA_CENTER, leading=10))
         tbl_data.append([
             Paragraph(name, cn),
             Paragraph(pub_dt, cc),
-            Paragraph((r["purchaser"] or "—").strip(), cn),
+            Paragraph((r["purchaser"] or "-").strip(), cn),
             Paragraph(_fmt_amount(r["budget"]), cc),
             Paragraph(open_dt, cc),
+            sme_cell,
             link_cell,
         ])
 
     tbl = Table(
         tbl_data,
-        colWidths=[6.5*cm, 1.8*cm, 3.2*cm, 1.8*cm, 2.0*cm, 1.2*cm],
+        colWidths=[5.5*cm, 1.7*cm, 2.8*cm, 1.7*cm, 1.8*cm, 1.6*cm, 1.2*cm],
         repeatRows=1
     )
     tbl.setStyle(TableStyle([
@@ -291,10 +356,10 @@ def _site_section(f: str, site: str, rows: List[dict]) -> list:
 
 
 def detail_pages(f: str, all_records: List[dict]) -> list:
-    """第2页起：
-    - 12个网站全部显示（无数据显示暂无提示）
+    """第2页起:
+    - 12个网站全部显示(无数据显示暂无提示)
     - 记录数 >= LARGE_SITE_THRESHOLD 的网站单独一页
-    - 其余网站连续排列，ReportLab自动续页
+    - 其余网站连续排列,ReportLab自动续页
     """
     story = []
 
@@ -303,7 +368,7 @@ def detail_pages(f: str, all_records: List[dict]) -> list:
         if r["proj_major_cat"] is None:
             by_site[r["site_name"]].append(r)
 
-    # 有数据的网站按 SITE_ORDER 排列；0条的网站统一放最后合并显示
+    # 有数据的网站按 SITE_ORDER 排列;0条的网站统一放最后合并显示
     sites_with_data = [s for s in SITE_ORDER if by_site.get(s)]
     sites_no_data   = [s for s in SITE_ORDER if not by_site.get(s)]
 
@@ -321,7 +386,7 @@ def detail_pages(f: str, all_records: List[dict]) -> list:
         story.extend(_site_section(f, site, rows))
         prev_was_large = is_large
 
-    # 0条网站合并到最后一页（接续上一段或另起）
+    # 0条网站合并到最后一页(接续上一段或另起)
     if sites_no_data:
         story.append(PageBreak())
         for site in sites_no_data:
@@ -367,7 +432,7 @@ def generate(year: int, month: int) -> str:
     doc.build(story)
     unclassified = sum(1 for r in all_records if r["proj_major_cat"] is None)
     classified   = sum(1 for r in all_records if r["proj_major_cat"] is not None)
-    print(f"✅ {fname}（总{len(all_records)}条：已分类{classified} / 未分类{unclassified}）")
+    print(f"✅ {fname}(总{len(all_records)}条:已分类{classified} / 未分类{unclassified})")
     return str(fname)
 
 

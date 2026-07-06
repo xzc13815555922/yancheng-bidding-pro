@@ -345,6 +345,32 @@ def build(year_month: Optional[str] = None):
         s_desc
     ))
 
+    # ============ P1-2026-07-06: 中小微专题统计 ============
+    # 采购意向本身通常不写「中小微政策」, 但统计块可作为采购预警参考
+    from collections import defaultdict as _dd
+    _conn = sqlite3.connect(str(UNIFIED_DB))
+    _cur = _conn.cursor()
+    _cur.execute(
+        "SELECT sme_target, COUNT(*) AS n FROM intention "
+        "WHERE std_district IN (?, ?) AND publish_date >= ? "
+        "GROUP BY sme_target", (*DISTRICTS, f"{ym}-01")
+    )
+    _sme_rows = _cur.fetchall()
+    _conn.close()
+    _sme_dict = {r[0]: r[1] for r in _sme_rows}
+    _sme_total = sum(_sme_dict.values())
+    _sme_targeted = _sme_dict.get('专门面向', 0)
+    _sme_pref = _sme_dict.get('非专门但优惠', 0)
+    _sme_note = ""
+    if _sme_targeted == 0 and _sme_pref == 0:
+        _sme_note = "采购意向本身不写「中小微政策」（未出招标公告），统计以出公告后为准。"
+    story.append(Paragraph(
+        f"▌ <b>中小微企业商机预警</b>：本批采购意向中标记「专门面向」的 {_sme_targeted} 条，"
+        f"「非专门但优惠」的 {_sme_pref} 条。{_sme_note}",
+        _style(f_pdf, "SME", fontSize=8.5, textColor=colors.HexColor("#2e7d32"),
+               leading=12, spaceAfter=0.25*cm, spaceBefore=0.2*cm)
+    ))
+
     # ── 第 2 页: 清单 1 ──
     story.append(PageBreak())
     story.append(Paragraph(
