@@ -551,3 +551,18 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 - **#125** `extract_sme_target.py`: 构建 `detail_url → md_path` 索引（跨 12 站 DB 的 page_path），避免 rebuild 后 intention.project_name 改为真名后找不到对应 MD
 
 **影响**：564 个 intention 记录从「盐城某单位X月(第N批)政府采购意向公告」变为真实项目名如「2026年亭湖区县道安全整治工程」。验证: 新 PDF 清单二 74 条全部真项目名 (0 批次名)。
+
+### P5 教训 (2026-07-06 18:50): enrich 修复后必须重生成全部 4 份 PDF
+
+**坑**: CEO 18:42 反馈 "90 万没显示" → 我 UPDATE 了 chennan.db 6ff7ee91 (奥体中心) → 重生成 7月招标公告 PDF → 重推 ✅. 但**没重生成倒计时 PDF** (它是早上 cron 8:30 生成推的), 所以群里看到的还是 15:50 版本 (奥体中心 — NULL). CEO 18:50 又问 "开标倒计时没显示".
+
+**修复策略**: 任何 enrich/DB 修复后, **必须全套 4 份 PDF 重生成**, 因为不同 PDF 由不同 cron 时刻生成:
+- `generate_tender_report.py` → 盐开招标公告_<月>.pdf
+- `generate_intention_report.py` → 盐开采购意向报告_<月>.pdf
+- `generate_countdown_report_pdf.py` → 盐开开标倒计时报告_<日>.pdf (默认今日)
+- `generate_operator_combined_report.py` → 盐城通信运营商中标报告_<月>.pdf
+
+**Checklist**:
+- [ ] 4 份 PDF 全部 `python3 generate_*.py` 重生成
+- [ ] pypdf 读 PDF 文本确认含预期金额
+- [ ] 4 份 push 到群 + CEO 私发
