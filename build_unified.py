@@ -173,25 +173,40 @@ def load_site(db_path: Path):
                 except Exception:
                     pass
             if not expanded:
-                # 单项 JSON 数组 → 展开为单条（用 expected_month 作为 expected_list）
+                # 单项 JSON 数组 → 也展开为单条, 用真项目名
+                # 修正 P3-2026-07-06 (CEO 反馈): 单项目批次也需用 expected_list[0].name 替代批次标题
+                # 注意: 共享 outer-scope 的 _json (line 11), 不可在函数内 import json as _json 否则会变 local var
                 single_month = None
+                single_name = None
+                single_budget = None
                 if elist_raw and elist_raw.strip().startswith("["):
                     try:
                         sub_items = _json.loads(elist_raw)
                         if isinstance(sub_items, list) and len(sub_items) == 1:
                             single_month = sub_items[0].get("expected_month")
+                            single_name = sub_items[0].get("name")
+                            single_budget = sub_items[0].get("budget_yuan")
                     except Exception:
                         pass
+                # 如果子项 name 不与批次名相同, 用子项 name (避免与 build_unified id 冲突)
+                if single_name and single_name != r.get("project_name"):
+                    final_name = single_name
+                    final_id = f"{r.get('id')}_1"
+                    final_budget = single_budget if single_budget is not None else r.get("budget")
+                else:
+                    final_name = r.get("project_name")
+                    final_id = r.get("id")
+                    final_budget = r.get("budget")
                 intentions.append((
-                    r.get("id"),
+                    final_id,
                     site_name,
                     r.get("std_district"),
                     r.get("proj_major_cat"),
                     r.get("proj_minor_cat"),
                     r.get("publish_date"),
-                    r.get("project_name"),
+                    final_name,
                     r.get("purchaser"),
-                    r.get("budget"),
+                    final_budget,
                     single_month or (elist_raw if not elist_raw.startswith("[") else None),
                     r.get("detail_url"),
                 ))
@@ -201,7 +216,6 @@ def load_site(db_path: Path):
             _rj = r.get("raw_json") or ""
             _type_hint = ""
             if _rj and "{" in _rj:
-                import json as _json
                 try:
                     _d = _json.loads(_rj)
                     _type_hint = str(_d.get("typeName") or _d.get("type_name") or "")

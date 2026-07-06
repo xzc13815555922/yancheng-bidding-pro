@@ -432,3 +432,13 @@ python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 
 **准确率验证**：随机抽 5 条「专门面向」 + 3 条「非专门但优惠」核对原文，均 100% 正确（关键词 + 上下文匹配）。
 
+
+| 127 | `build_unified.py` line 227 | **删 `import json as _json`（嵌套函数）→ 用顶部 `import json as _json`** | P0 修复前 `_json` 局部化让整函数 `_json.loads()` 抛 UnboundLocalError |
+| 128 | `build_unified.py` line 175-200 | intention 单项目分支也用子项 name + `_1` 后缀（仅多项目用子项 name） | intention 564 个单项目批次 project_name 由批次标题改为真项目名 |
+| 129 | `extract_sme_target.py` | 新增 `_URL_INDEX` 跨站建 `detail_url → md_path` 索引 | rebuild 后 intention.project_name 改为真名也能找到对应 MD（之前 648 个「未找到」）|
+
+**P3-2026-07-06 修复实测数据**：
+- 修复前: intention 总数 1183, 519 真项目名 (43.9%), 564 用批次名 (47.6%)
+- 修复后: intention 总数 1187, 1172 真项目名 (98.7%), 15 用批次名 (1.3%, 全部是「建湖县排水防涝工程（第三批）」这类 真·批次项目名)
+- intention SME 标签: 0 专门面向 → 376 专门面向 (47.5% 命中率)
+- 新 PDF 清单二 74 条全部真项目名, 0 批次名

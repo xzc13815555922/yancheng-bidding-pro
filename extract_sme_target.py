@@ -92,6 +92,41 @@ PREFERENCE_PATTERNS = [
 TEMPLATE_SECTION = re.compile(r'十[、\.]\s*附件|附件[：:]')
 
 
+# P3-2026-07-06: detail_url → md_path 索引 (主问题修复: rebuild 后 intention.project_name 已变真名)
+_URL_INDEX = {}
+
+def _build_url_index():
+    if _URL_INDEX:
+        return _URL_INDEX
+    for db_path in PAGES_DIR.parent.glob('*.db'):
+        if db_path.name == 'unified.db':
+            continue
+        try:
+            conn = sqlite3.connect(str(db_path))
+            rows = conn.execute(
+                "SELECT detail_url, page_path FROM notices "
+                "WHERE detail_url IS NOT NULL AND page_path IS NOT NULL"
+            ).fetchall()
+            conn.close()
+            for url, pp in rows:
+                if pp and Path(pp).exists():
+                    _URL_INDEX[url] = Path(pp)
+        except Exception:
+            pass
+    return _URL_INDEX
+
+
+def find_md(site_name, project_name, detail_url):
+    """找对应 MD。优先级: _URL_INDEX → project_name.md"""
+    if detail_url and detail_url in _URL_INDEX:
+        return _URL_INDEX[detail_url]
+    short = SITE_NAME_MAP.get(site_name, site_name)
+    md_path = PAGES_DIR / short / f'{project_name}.md'
+    if md_path.exists():
+        return md_path
+    return None
+
+
 def classify_md(md_text: str) -> str:
     """对单个 MD 内容分类"""
     if not md_text:
@@ -128,6 +163,9 @@ def classify_md(md_text: str) -> str:
 
 
 def main():
+    # 构建 detail_url → md 索引
+    idx = _build_url_index()
+    print(f"📋 _URL_INDEX: {len(idx)} 条")
     """从 MD 提取 → 写 unified.db"""
     if not PAGES_DIR.is_dir():
         print(f"❌ {PAGES_DIR} 不存在")
@@ -169,17 +207,9 @@ def main():
         site_name = site_dir.name
         site_md_cache[site_name] = list(site_dir.glob('*.md'))
     
-    # 用于去重的 seen set
-    def find_md(site_name: str, project_name: str, detail_url: str):
-        """找对应 MD"""
-        # 映射长名到短名
-        short = SITE_NAME_MAP.get(site_name, site_name)
-        md_path = PAGES_DIR / short / f'{project_name}.md'
-        if md_path.exists():
-            return md_path
-        return None
-    
-    # 4) 处理 tender
+    # 用于去重的 seen set (find_md 是 module-level 函数)
+
+# 4) 处理 tender
     cur.execute("SELECT id, site_name, project_name, detail_url FROM tender WHERE detail_url IS NOT NULL")
     tender_rows = cur.fetchall()
     

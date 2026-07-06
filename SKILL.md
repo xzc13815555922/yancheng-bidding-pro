@@ -540,3 +540,14 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 | 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.6)` | openclaw message send ×4（含预检探测 + 失败重试） | 1800s |
 
 **预期耗时**：05:00 cron 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 1-2 分钟（channel-info 预检 + 4次 send，失败 sleep 5s 重试 1 次，v2.6 修复后几乎不需重试）。
+
+### P0 修复（2026-07-06）：采购意向批次标题误当项目名
+
+**Bug**：`build_unified.py` line 227 `import json as _json`（嵌套函数内）让同函数的 `_json` 标 local，导致 `intention` 分支 `sub_items = _json.loads(...)` 抛 `UnboundLocalError` → except 捕获 → `single_name = None` → 564 个单项目批次全部用批次标题。
+
+**永久修复（#123-#125）**：
+- **#123** `build_unified.py`: 删除嵌套 `import json as _json`，改用顶部 `import json as _json` (line 11)
+- **#124** `build_unified.py`: intention 单项目分支（`len==1`）也用子项 name + `_1` 后缀（之前仅多项目用子项 name）
+- **#125** `extract_sme_target.py`: 构建 `detail_url → md_path` 索引（跨 12 站 DB 的 page_path），避免 rebuild 后 intention.project_name 改为真名后找不到对应 MD
+
+**影响**：564 个 intention 记录从「盐城某单位X月(第N批)政府采购意向公告」变为真实项目名如「2026年亭湖区县道安全整治工程」。验证: 新 PDF 清单二 74 条全部真项目名 (0 批次名)。
