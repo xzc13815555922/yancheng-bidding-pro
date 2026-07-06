@@ -383,3 +383,39 @@ python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 | 平均招采周期 | 20 天 |
 | 平均中标折扣率 | 83.7%（预算>1万，ratio 0.3~1.5 样本） |
 | 含更正公告的链路 | 22%（598条，平均1.8次更正）|
+
+---
+
+## 修复清单（v2.6 → v2.7，2026-07-06）
+
+### P0：重复入库修复（tyc + yancheng_gov + unified）
+
+| # | 站点/文件 | 问题 | 根因 | 修复 | 效果 |
+|---|----------|------|------|------|------|
+| 113 | `crawlers/base.py` make_id | 同项目多包公告被分 2-N 条入库 | `project_name` 未去 "采购包N" 后缀 | `re.sub(r'(采购包\s*\d+\s*)$', '', project_name)` 再哈希 | 跨站去重 |
+| 114 | `crawlers/tyc_crawler.py` make_id | tyc 同项目多包入库 | 同上 | 同上修复 | tyc 重复入库阻断 |
+| 115 | `data/tyc.db` | 同 `detail_url` 重复入库 | 缺兜底 | `CREATE UNIQUE INDEX idx_tyc_detail_url ON tyc_awards(detail_url)` | 重复 INSERT 拒入 |
+| 116 | `data/yancheng_gov.db` | 同上 | 同上 | `CREATE UNIQUE INDEX idx_notices_detail_url ON notices(detail_url)` | 重复 INSERT 拒入 |
+| 117 | `data/unified.db` | 跨站 award 重复 | dedup_awards 漏跨日 | 新增 `_dedup_tenders` 按 (detail_url, publish_date) | rebuild 后 0 重复 |
+
+**双保险机制**：make_id 防止（去后缀）+ DB UNIQUE INDEX 兜底（按 detail_url）。跨日期合法业务（ycggzy/dushi/chennan.notices 跨日变更、`unified.intention` 汇总页）不加 UNIQUE INDEX。
+
+**发现/处理过程**：7/6 清理 tyc.db 重复时发现「同金额 28 组」实际有 3 组是「主+采购包1+采购包2」真多包项目，header 字段错位导致 DB 金额不准。已 fetch 详情页修正 3 个真多包项目（姜堰区/苏州丝绸/江苏公安厅二级主干网）的 7 条金额。
+
+### P0：运营商报告金额单位修复（防"X万显示成X元"）
+
+| # | 位置 | 问题 | 根因 | 修复 | 验证 |
+|---|------|------|------|------|------|
+| 118 | `generate_operator_combined_report.py` `load_tyc` | fire 项目 41.5万 被显示成 41元 | 注释写"万→元"但代码漏了 `* 10000` | 加回 `amount * 10000 if amount else None` | PDF PyPDF2 提取：41.5万 ✓ |
+| 119 | 影响范围 | 50 条盐城 tyc 历史数据 < 1000 万 | 同一 bug | 改 1 行全部修复 | 7 月报告 4 条运营商记录全对 |
+
+### 飞书推送 cron 升级 v2.4 → v2.6
+
+| # | 变更 | 原因 | 验证 |
+|---|------|------|------|
+| 120 | cron 名称 `(v2.4)` → `(v2.6)` | 与 message 实际版本一致 | cron run 后 summary 4/4 一次通过 |
+| 121 | grep `om_x[0-9a-f]+` → `om_[0-9a-f]+` | 实际 messageId 以 `om_` 开头，旧模式漏匹配导致 cron 报告一直显示"首次失败"假警报 | v2.6 跑后 4/4 全显示"首次成功" |
+| 122 | `sleep 30s` → `sleep 5s` 重试间隔 | 飞书 API 瞬时失败多在 1-2s 恢复 | cron run 55.5s 完成（原 90s+） |
+
+**实锤证据**：v2.6 cron run（2026-07-06 16:19）4 份 PDF 全部一次推送成功，messageId `om_x100b6b821e70a4a0b1dae01db6d9f4f` 等 4 条 `openclaw message read --message-id` 全部 `ok: true`。
+

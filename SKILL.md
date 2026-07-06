@@ -205,6 +205,39 @@ python3 enrich_yancheng_gov.py
 
 ---
 
+## 本轮修复清单（v2.5 → v2.6，2026-07-06）
+
+### P0 重复入库修复（tyc + yancheng_gov + unified）
+
+| # | 站点/文件 | 问题 | 根因 | 修复 | 效果 |
+|---|----------|------|------|------|------|
+| 98 | `crawlers/base.py` make_id | 同项目多包公告被分 2-N 条入库 | `project_name` 未去 "采购包N" 后缀 | `re.sub(r'(采购包\s*\d+\s*)$', '', project_name)` 再哈希 | 跨站去重 |
+| 99 | `crawlers/tyc_crawler.py` make_id | tyc 同项目多包入库 | 同上 | 同上修复 | tyc 重复入库阻断 |
+| 100 | `data/tyc.db` | 同 `detail_url` 重复入库 | 缺兜底 | `CREATE UNIQUE INDEX idx_tyc_detail_url ON tyc_awards(detail_url)` | 重复 INSERT 拒入 |
+| 101 | `data/yancheng_gov.db` | 同上 | 同上 | `CREATE UNIQUE INDEX idx_notices_detail_url ON notices(detail_url)` | 重复 INSERT 拒入 |
+| 102 | `data/unified.db` | 跨站 award 重复 | dedup_awards 漏跨日 | 新增 `_dedup_tenders` 按 (detail_url, publish_date) | rebuild 后 0 重复 |
+
+**双保险机制**：make_id 防止（去后缀）+ DB UNIQUE INDEX 兜底（按 detail_url）。跨日期合法业务（ycggzy/dushi/chennan.notices 跨日变更、`unified.intention` 汇总页）不加 UNIQUE INDEX。
+
+### P0 运营商报告金额单位修复（防"X万显示成X元"）
+
+| # | 位置 | 问题 | 根因 | 修复 | 验证 |
+|---|------|------|------|------|------|
+| 103 | `generate_operator_combined_report.py` `load_tyc` | fire 项目 41.5万 被显示成 41元 | 注释写"万→元"但代码漏了 `* 10000` | 加回 `amount * 10000 if amount else None` | PDF PyPDF2 提取：41.5万 ✓ |
+| 104 | 影响范围 | 50 条盐城 tyc 历史数据 < 1000 万 | 同一 bug | 改 1 行全部修复 | 7 月报告 4 条运营商记录全对 |
+
+### 飞书推送 cron 升级 v2.4 → v2.6
+
+| # | 变更 | 原因 | 验证 |
+|---|------|------|------|
+| 105 | cron 名称 `(v2.4)` → `(v2.6)` | 与 message 实际版本一致 | cron run 后 summary 4/4 一次通过 |
+| 106 | grep `om_x[0-9a-f]+` → `om_[0-9a-f]+` | 实际 messageId 以 `om_` 开头，旧模式漏匹配导致 cron 报告一直显示"首次失败"假警报 | v2.6 跑后 4/4 全显示"首次成功" |
+| 107 | `sleep 30s` → `sleep 5s` 重试间隔 | 飞书 API 瞬时失败多在 1-2s 恢复 | cron run 55.5s 完成（原本 90s+） |
+
+**实锤证据**：v2.6 cron run（2026-07-06 16:19）4 份 PDF 全部一次推送成功，messageId `om_x100b6b821e70a4a0b1dae01db6d9f4f` 等 4 条 `openclaw message read --message-id` 全部 `ok: true`。
+
+---
+
 ## 本轮修复清单（v2.3 → v2.4，2026-06-25）
 
 ### P0 数据误提取清除
@@ -493,6 +526,6 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 | cron 时间 | 任务 | 调用的脚本 | 超时 |
 |---------|------|-----------|------|
 | 05:00 全流程 | `yancheng-bidding-pro daily 5:00 full pipeline` | `bash run-full-pipeline.sh` | 3600s |
-| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.4)` | openclaw message send ×4（含预检探测 + 失败重试） | 1800s |
+| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.6)` | openclaw message send ×4（含预检探测 + 失败重试） | 1800s |
 
-**预期耗时**：05:00 cron 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 2-3 分钟（channel-info 预检 + 4次 send，失败 sleep 30s 重试 1 次）。
+**预期耗时**：05:00 cron 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 1-2 分钟（channel-info 预检 + 4次 send，失败 sleep 5s 重试 1 次，v2.6 修复后几乎不需重试）。

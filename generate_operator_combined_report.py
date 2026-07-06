@@ -157,7 +157,7 @@ def load_tyc(month_str=None) -> list:
             "winner":       "",          # tyc 的 winner 字段是采集时的原始文本，不需要展示
             "winner_short": short or "",
             "group":        group or "",
-            "amount":       amount,
+            "amount":       amount * 10000 if amount else None,  # 万→元，统一单位 (P0-2026-07-06: 41.5万曾被显示为41元)
             "detail_url":   url or "",
             "source":       "tyc",
         })
