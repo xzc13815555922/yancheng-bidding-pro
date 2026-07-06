@@ -64,6 +64,15 @@ BUDGET_KEYWORDS = [
     "合同预估金额（万元）", "合同预计金额（万元）",
     "预算金额（万元）", "最高限价(万元)", "招标控制价(万元)",
 ]
+
+# 2026-07-06 P4 修复 — 高可信预算词 (项目总投资/预估总投资/总投资额)
+# 不被 BUDGET_EXCLUDE (服务费/代理费/咨询费) 误杀. 例:
+# "项目规模：... 预估项目总投资300万元, 本次招标项目服务费约5万元"
+# 原始 BUDGET_KEYWORDS 顺序里 "项目规模" 优先命中, 但 chunk 后被 BUDGET_EXCLUDE (服务费) 跳过
+PRECISE_BUDGET_KEYWORDS = [
+    "项目总投资", "预估项目总投资", "总投资额", "项目总投资额",
+    "预估总投资", "工程总投资额", "项目概算总投资",
+]
 # 非关键词触发的 budget 正则（句中直接出现）
 _BUDGET_INLINE_RE = [
     re.compile(r'不(?:超过|高于)人民币\s*([\d.]+)\s*(万元|亿元|元)'),
@@ -363,6 +372,24 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
 
     # 预算金额（过滤保证金等）
     t_nospace = re.sub(r'\s+', '', text)
+
+    # 2026-07-06 P4: 高可信予算词优先匹配 (不被 BUDGET_EXCLUDE 误杀)
+    # 例: "预估项目总投资300万元" - kw后跟数字无冒号
+    _PRECISE_RE = re.compile(
+        r'(?:项目总投资|预估项目总投资|总投资额|项目总投资额|预估总投资|'
+        r'工程总投资额|项目概算总投资)'
+        r'[\s\S]{0,10}?(\d[\d.]*)\s*(万元|万|亿|元)'
+    )
+    m_precise = _PRECISE_RE.search(t_nospace)
+    if m_precise:
+        amount_raw = m_precise.group(1) + m_precise.group(2)
+        amount, unit = _parse_amount(amount_raw)
+        if amount and amount > 0 and 100 <= amount <= 5e10:
+            result["budget"] = amount
+            result["budget_unit"] = unit
+            result["budget_text"] = m_precise.group(0)[:40]
+            return result
+
     for kw in BUDGET_KEYWORDS:
         chunk = _extract_after_keyword(text, [kw], 60)
         if not chunk:
