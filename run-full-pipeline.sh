@@ -69,10 +69,11 @@ $PYTHON enrich_details.py || {
 }
 
 # ============================================
-# 第3.5步：提取中小微企业标签 (P1-2026-07-06)
+# 第3.5步：提取中小微企业标签 (P1-2026-07-06, CEO 拍板)
 # 从已抓的 MD 缓存提取 sme_target, 写 unified.db
+# 用于报表清单加列「中小微」 (专门=绿/优惠=橙)
 # ============================================
-log "[Step 3.5/10] extract_sme_target.py (中小微企业标签提取)"
+log "[Step 3.5/10] extract_sme_target.py (中小微企业标签提取 → 写 unified.db)"
 $PYTHON extract_sme_target.py || {
     log "⚠️  extract_sme_target 返回非0，继续"
 }

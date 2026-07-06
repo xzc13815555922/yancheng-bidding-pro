@@ -100,7 +100,7 @@ def _query_month_intentions(year_month: str) -> List[dict]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
         SELECT id, site_name, project_name, publish_date,
-               purchaser, budget, detail_url
+               purchaser, budget, detail_url, sme_target
         FROM intention
         WHERE std_district IN (?, ?)
           AND proj_major_cat IS NULL
@@ -119,7 +119,7 @@ def _query_preexisting_intentions(year_month: str) -> List[dict]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
         SELECT id, site_name, project_name, publish_date,
-               purchaser, budget, detail_url
+               purchaser, budget, detail_url, sme_target
         FROM intention
         WHERE std_district IN (?, ?)
           AND proj_major_cat IS NULL
@@ -201,8 +201,8 @@ def _dedup_against_tender(intentions: List[dict],
 
 # ── 表格构建 ────────────────────────────────────────────────
 def _build_table(f: str, rows: List[dict]) -> Table:
-    """| 序号 | 项目名称 | 发包人 | 发布时间 | 预算 | 详情链接 |"""
-    header = ["序号", "项目名称", "发包人", "发布时间", "预算", "详情"]
+    """| 序号 | 项目名称 | 发包人 | 发布时间 | 预算 | 中小微 | 详情链接 |"""
+    header = ["序号", "项目名称", "发包人", "发布时间", "预算", "中小微", "详情"]
     body = [header]
     for i, r in enumerate(rows, 1):
         url = r.get("detail_url") or ""
@@ -219,6 +219,20 @@ def _build_table(f: str, rows: List[dict]) -> Table:
         else:
             link_p = Paragraph("—", ParagraphStyle("Lk", parent=getSampleStyleSheet()["Normal"],
                                                    fontName=f, fontSize=7.5, alignment=TA_CENTER))
+        # 中小微列 (P1-2026-07-06)
+        sme = r.get("sme_target") or "不涉及"
+        if sme == "专门面向":
+            sme_p = Paragraph("<font color='#2e7d32'><b>● 专门面向</b></font>",
+                              ParagraphStyle("Sme1", parent=getSampleStyleSheet()["Normal"],
+                                             fontName=f, fontSize=7, alignment=TA_CENTER))
+        elif sme == "非专门但优惠":
+            sme_p = Paragraph("<font color='#f57c00'><b>● 优惠</b></font>",
+                              ParagraphStyle("Sme2", parent=getSampleStyleSheet()["Normal"],
+                                             fontName=f, fontSize=7, alignment=TA_CENTER))
+        else:
+            sme_p = Paragraph("",
+                              ParagraphStyle("Sme3", parent=getSampleStyleSheet()["Normal"],
+                                             fontName=f, fontSize=7, alignment=TA_CENTER))
         body.append([
             str(i),
             Paragraph(r.get("project_name") or "—",
@@ -233,10 +247,11 @@ def _build_table(f: str, rows: List[dict]) -> Table:
             Paragraph(_fmt_budget(r.get("budget")),
                       ParagraphStyle("BG", parent=getSampleStyleSheet()["Normal"],
                                      fontName=f, fontSize=7.5, alignment=TA_CENTER)),
+            sme_p,
             link_p,
         ])
 
-    col_widths = [1.2*cm, 8.5*cm, 5.0*cm, 2.4*cm, 2.2*cm, 2.0*cm]
+    col_widths = [1.0*cm, 7.5*cm, 4.5*cm, 2.0*cm, 1.8*cm, 1.8*cm, 1.6*cm]
     t = Table(body, colWidths=col_widths, repeatRows=1)
 
     style_cmds = [
@@ -343,32 +358,6 @@ def build(year_month: Optional[str] = None):
     story.append(Paragraph(
         f"<b>清单 2　前期发布未挂招标公告</b>：{ym}-01 之前发布，已剔除已挂招标的 <b>{len(dedup_log)}</b> 条，剩余 <b>{len(pre_kept)}</b> 条，按发布日期升序（最旧在前）",
         s_desc
-    ))
-
-    # ============ P1-2026-07-06: 中小微专题统计 ============
-    # 采购意向本身通常不写「中小微政策」, 但统计块可作为采购预警参考
-    from collections import defaultdict as _dd
-    _conn = sqlite3.connect(str(UNIFIED_DB))
-    _cur = _conn.cursor()
-    _cur.execute(
-        "SELECT sme_target, COUNT(*) AS n FROM intention "
-        "WHERE std_district IN (?, ?) AND publish_date >= ? "
-        "GROUP BY sme_target", (*DISTRICTS, f"{ym}-01")
-    )
-    _sme_rows = _cur.fetchall()
-    _conn.close()
-    _sme_dict = {r[0]: r[1] for r in _sme_rows}
-    _sme_total = sum(_sme_dict.values())
-    _sme_targeted = _sme_dict.get('专门面向', 0)
-    _sme_pref = _sme_dict.get('非专门但优惠', 0)
-    _sme_note = ""
-    if _sme_targeted == 0 and _sme_pref == 0:
-        _sme_note = "采购意向本身不写「中小微政策」（未出招标公告），统计以出公告后为准。"
-    story.append(Paragraph(
-        f"▌ <b>中小微企业商机预警</b>：本批采购意向中标记「专门面向」的 {_sme_targeted} 条，"
-        f"「非专门但优惠」的 {_sme_pref} 条。{_sme_note}",
-        _style(f_pdf, "SME", fontSize=8.5, textColor=colors.HexColor("#2e7d32"),
-               leading=12, spaceAfter=0.25*cm, spaceBefore=0.2*cm)
     ))
 
     # ── 第 2 页: 清单 1 ──

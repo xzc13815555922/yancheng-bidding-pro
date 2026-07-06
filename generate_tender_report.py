@@ -216,64 +216,12 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
     note = _style(f, "NOTE", fontSize=8.5, textColor=colors.HexColor("#444444"),
                   leading=13, spaceBefore=0.35*cm)
     story.append(Paragraph(
-        '【分类说明】"非相关招标"指已通过关键词规则归类为与公司业务无关的项目'
-        '(如:建设工程、物业服务、法律服务、车辆采购、IT设备、'
-        '设计服务、垃圾与环卫、电梯服务等),仅作统计留存,不进入商机池。'
-        '"重点招标"为尚未归类、需人工研判的潜在商机,明细清单页逐网站展示。',
+        '【分类说明】“非相关招标”指已通过关键词规则归类为与公司业务无关的项目'
+        '（如：建设工程、物业服务、法律服务、车辆采购、IT设备、'
+        '设计服务、垃圾与环卫、电梯服务等），仅作统计留存，不进入商机池。'
+        '“重点招标”为尚未归类、需人工研判的潜在商机，明细清单页逐网站展示。',
         note
     ))
-
-    # ============ P1-2026-07-06: 中小微专题统计 (本月中标公告中面向中小微政策) ============
-    sme_rows = _query(
-        "SELECT sme_target, COUNT(*) AS n FROM tender "
-        "WHERE std_district IN ('盐南','经开') "
-        "  AND publish_date BETWEEN ? AND ? "
-        "GROUP BY sme_target",
-        (first, last)
-    )
-    sme_dict = {r['sme_target']: r['n'] for r in sme_rows}
-    sme_total = sum(sme_dict.values())
-    if sme_total > 0:
-        story.append(Paragraph("▌ 中小微企业专题(本月)", sec2 := _style(f, "SME_H", fontSize=12, textColor=DARK_BLUE, spaceAfter=0.2*cm, spaceBefore=0.35*cm)))
-        sme_tbl = [[
-            Paragraph("中小微政策类型", h),
-            Paragraph("当月项目数", h),
-            Paragraph("占比", h),
-            Paragraph("说明", h),
-        ]]
-        sme_legend = [
-            ("专门面向", colors.HexColor("#2e7d32"), "项目只接受中小微企业投标(需提供《中小企业声明函》)"),
-            ("非专门但优惠", colors.HexColor("#f57c00"), "不限资质,中小微报价给予 10-20% 价格扣除"),
-            ("不涉及", colors.HexColor("#9e9e9e"), "未提中小微相关政策"),
-        ]
-        for label, color, desc in sme_legend:
-            n = sme_dict.get(label, 0)
-            pct = f"{n*100/sme_total:.1f}%" if sme_total else "-"
-            sme_tbl.append([
-                Paragraph(f"<font color='{color.hexval()}'>●</font> {label}", _style(f, f"sl{label}", fontSize=9, alignment=TA_LEFT, leading=12)),
-                Paragraph(str(n) if n else "-", cv),
-                Paragraph(pct, cv),
-                Paragraph(desc, _style(f, f"sd{label}", fontSize=8, alignment=TA_LEFT, leading=11)),
-            ])
-        sme_tbl.append([
-            Paragraph("合计", _style(f, "sme_tot", fontSize=9, alignment=TA_CENTER, leading=12)),
-            Paragraph(str(sme_total), cv),
-            Paragraph("100.0%", cv),
-            Paragraph("-", cv),
-        ])
-        sme_table = Table(sme_tbl, colWidths=[3.5*cm, 2.3*cm, 2.0*cm, 9.7*cm], repeatRows=1)
-        sme_table.setStyle(TableStyle([
-            ("BACKGROUND",    (0, 0),  (-1, 0),  DARK_BLUE),
-            ("BACKGROUND",    (0, -1), (-1, -1), LIGHT_BLUE),
-            ("ROWBACKGROUNDS",(0, 1),  (-1, -2), [colors.white, ROW_ALT]),
-            ("GRID",          (0, 0),  (-1, -1), 0.3, colors.grey),
-            ("VALIGN",        (0, 0),  (-1, -1), "MIDDLE"),
-            ("TOPPADDING",    (0, 0),  (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0),  (-1, -1), 4),
-            ("LEFTPADDING",   (0, 0),  (-1, -1), 5),
-            ("RIGHTPADDING",  (0, 0),  (-1, -1), 4),
-        ]))
-        story.append(sme_table)
 
     return story
 
