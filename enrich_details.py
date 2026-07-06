@@ -58,6 +58,16 @@ BUDGET_KEYWORDS = [
     "规模", "建设规模", "工程规模",
     # 2026-06-25 审计 P2-1 新增 — jszbcg 招标公告固定格式"自筹资金/财政资金：48万元"
     "自筹资金", "财政资金", "财政性资金",
+    # 2026-07-06 P5 — jszbcg 招标公告固定格式 "项目资金来源为XX资金：25.5万元"
+    # 4 种资金来源: 其他资金/自筹资金/国有资金/私有资金
+    "项目资金来源为其他资金", "项目资金来源为财政资金", "项目资金来源为自筹资金",
+    "项目资金来源为国有资金", "项目资金来源为私有资金",
+    "项目资金米源",  # jszbcg OCR 错误 ("来源" 写成 "米源")
+    "资金来源为其他资金", "资金来源为国有资金", "资金来源为私有资金",
+    # 2026-07-06 P6 — "预算：人民币X万元" / "起始价X万元" 等变种
+    "预算：人民币", "预算人民币", "起始价",
+    # ycggzy 表格变种 - 资金来自 + 自筹/财政
+    "建设资金来自", "资金来自",
     # 2026-06-25 审计 P1-6 新增 — 抽自 yancheng_gov 意向公告表头 1363 次
     # 带括号单位的列名变种 (需 _parse_amount 处理)
     "采购预算(万元)", "项目预算(万元)",
@@ -236,27 +246,39 @@ def _parse_amount(raw: str) -> Tuple[Optional[float], str]:
     if not raw:
         return None, "UNKNOWN"
     raw = raw.replace(",", "").replace("，", "")
-    # 优先匹配"总计XXX元"（避免被"单价X元/月/台"抢先）
+    # P6-2026-07-06: 数字里有多个 . (如 jszbcg "93.192.6万元") 会让 float() 崩溃
+    # 修复: 先尝试严格匹配 1-3 位小数 + 单位的带单位数字
+    def safe_float(s):
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    # 优先匹配"总计XXX元"
     m_total = re.search(r'总计\s*([\d.]+)\s*(亿|万元|万|元)', raw)
     if m_total:
-        num, unit = float(m_total.group(1)), m_total.group(2)
-        if unit == "亿": return num * 1e8, "亿"
-        if unit in ("万元", "万"): return num * 1e4, "元"
-        return num, "元"
-    # 带单位的数字
+        num = safe_float(m_total.group(1))
+        if num is not None:
+            unit = m_total.group(2)
+            if unit == "亿": return num * 1e8, "亿"
+            if unit in ("万元", "万"): return num * 1e4, "元"
+            return num, "元"
+    # 带单位的数字 (数字 + 万元/万/元)
     m = re.search(r'([\d.]+)\s*(亿|万元|万|元|RMB)', raw)
     if m:
-        num = float(m.group(1))
-        unit = m.group(2)
-        if unit == "亿":
-            return num * 1e8, "亿"
-        if unit in ("万元", "万"):
-            return num * 1e4, "元"
-        return num, "元"
+        num = safe_float(m.group(1))
+        if num is not None:
+            unit = m.group(2)
+            if unit == "亿":
+                return num * 1e8, "亿"
+            if unit in ("万元", "万"):
+                return num * 1e4, "元"
+            return num, "元"
     # 纯数字
     m2 = re.search(r'([\d.]+)', raw)
     if m2:
-        return float(m2.group(1)), "元"
+        num = safe_float(m2.group(1))
+        if num is not None:
+            return num, "元"
     return None, "UNKNOWN"
 
 
