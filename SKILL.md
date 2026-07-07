@@ -284,6 +284,30 @@ tests = [
 
 **日志**：详见 git commit `8a92db3`。
 
+### P1-4: tyc_crawler 浏览器资源释放加固
+
+| # | 位置 | 问题 | 根因 | 修复 | 效果 |
+|---|------|------|------|------|------|
+| 141 | `crawlers/tyc_crawler.py:574` `main()` | 3 个浏览器资源泄露路径：<br>(1) `create_context()` 抛异常 → 原代码无 try/except<br>(2) `add_cookies`/`new_page` 抛异常 → 原 finally 不会执行<br>(3) finally 只 close `browser/p/conn`，缺 `context.close()` | 原代码 `try` 从采集循环开始，不包含 `create_context()`；且 finally 资源释放顺序/范围不全 | 外层 `try/except/finally` 包住整个 main 流程；`p/b/context/page` 预声明 `None`；每个 close 单独 `try/except`；`total_stats` 预声明 | 4 个异常场景资源全部释放（context.close / browser.close / p.stop / conn.close 均 0/1 次调用） |
+| 142 | 边界场景验证 | 模拟 4 个异常路径 | 单元测试不覆盖 | `unittest.mock.MagicMock` patch `create_context` | 表格验证详见 commit `3528e76` |
+| 143 | 正常流程回归 | 30s 跑 2 企业（江苏移动+盐城移动） | 验证修复未引入性能/逻辑回归 | 2 企业各 4/2 条入库 | 0 僵尸进程 ✅ |
+
+**资源释放验证表**（4 个场景）：
+
+| 场景 | context.close | browser.close | p.stop | conn.close |
+|------|--------------|--------------|--------|-----------|
+| create_context 立刻抛（playwright 没装） | 0 ✓ | 0 ✓ | 0 ✓ | 1 ✓ |
+| new_context 失败 → context=None | 0 ✓（None 不调） | 1 ✓ | 1 ✓ | 1 ✓ |
+| add_cookies 失败 | 1 ✓ | 1 ✓ | 1 ✓ | 1 ✓ |
+| new_page 失败 | 1 ✓ | 1 ✓ | 1 ✓ | 1 ✓ |
+
+**关键设计选择**（与 azE 方案略不同，已注释说明）：
+- 用 `p = browser = context = page = None` 预声明代替 `'name' in dir()` —— 后者在函数内永远返回内置名+局部名，逻辑不稳
+- 用 **外层 try/except/finally** 而不是 azE 方案里的 `try/finally` 包住 `create_context` + 内层 `try/finally` 包循环 —— 因为 azE 方案下异常路径 finally 不会执行（实测验证）
+- `total_stats` 也预声明 —— 异常路径上汇总日志不会抛 `UnboundLocalError`
+
+**日志**：详见 git commit `3528e76`。
+
 ### P2-2: infer_notice_type 关键词优先级（BUG-17 修复）
 
 | # | 文件 | 问题 | 根因 | 修复 | 验证 |
