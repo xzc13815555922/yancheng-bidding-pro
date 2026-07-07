@@ -27,6 +27,9 @@ from reportlab.platypus import (
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+# P1-2026-07-07: per-section try/except
+from pdf_safe_section import safe_section, SafeSectionTracker
+
 UNIFIED_DB = Path(__file__).parent / "data" / "unified.db"
 OUTPUT_DIR = Path(__file__).parent / "output"
 LOGS_DIR   = Path(__file__).parent / "logs"
@@ -331,6 +334,9 @@ def build(year_month: Optional[str] = None):
     s_desc   = _style(f_pdf, "Desc",   fontSize=9, textColor=colors.HexColor("#333333"),
                       alignment=TA_LEFT, spaceAfter=0.3*cm, leading=12)
 
+    # P1-2026-07-07: 跨 2 个清单的 tracker
+    tracker = SafeSectionTracker()
+
     story = []
 
     # ── 第 1 页: 标题 + 说明 ──
@@ -361,36 +367,55 @@ def build(year_month: Optional[str] = None):
     ))
 
     # ── 第 2 页: 清单 1 ──
+    # P1-2026-07-07: 清单1 整体（标题+表格+说明）包 safe_section
     story.append(PageBreak())
     story.append(Paragraph(
         f"  清单一　{ym} 当月新发布采购意向（共 {len(month_rows)} 条，最新在前）",
         s_sec
     ))
     story.append(Spacer(1, 0.2*cm))
-    if month_rows:
-        story.append(Paragraph(
-            "⬛ 按 publish_date 降序排序，最新发布在前；项目名相同时按字典序",
-            s_note
-        ))
-        story.append(_build_table(f_pdf, month_rows))
-    else:
-        story.append(Paragraph("　　本期暂无当月新发布的采购意向。", s_note))
+
+    def _build_list1():
+        blocks = []
+        if month_rows:
+            blocks.append(Paragraph(
+                "⬛ 按 publish_date 降序排序，最新发布在前；项目名相同时按字典序",
+                s_note
+            ))
+            blocks.append(_build_table(f_pdf, month_rows))
+        else:
+            blocks.append(Paragraph("　　本期暂无当月新发布的采购意向。", s_note))
+        return blocks
+
+    list1_block = safe_section("清单 1 · 当月新发布采购意向", _build_list1, tracker=tracker)
+    story.extend(list1_block)
 
     # ── 第 3 页: 清单 2 ──
+    # P1-2026-07-07: 清单2 整体（标题+表格+说明）包 safe_section
     story.append(PageBreak())
     story.append(Paragraph(
         f"  清单二　{ym} 之前发布未挂招标公告（共 {len(pre_kept)} 条，最旧在前）",
         s_sec
     ))
     story.append(Spacer(1, 0.2*cm))
-    if pre_kept:
-        story.append(Paragraph(
-            f"⬛ 候选 {len(pre_rows)} 条，已剔除已挂招标 {len(dedup_log)} 条，按 publish_date 升序排序，最旧在前",
-            s_note
-        ))
-        story.append(_build_table(f_pdf, pre_kept))
-    else:
-        story.append(Paragraph("　　本期暂无前期发布未挂招标的采购意向。", s_note))
+
+    def _build_list2():
+        blocks = []
+        if pre_kept:
+            blocks.append(Paragraph(
+                f"⬛ 候选 {len(pre_rows)} 条，已剔除已挂招标 {len(dedup_log)} 条，按 publish_date 升序排序，最旧在前",
+                s_note
+            ))
+            blocks.append(_build_table(f_pdf, pre_kept))
+        else:
+            blocks.append(Paragraph("　　本期暂无前期发布未挂招标的采购意向。", s_note))
+        return blocks
+
+    list2_block = safe_section("清单 2 · 前期未挂招标采购意向", _build_list2, tracker=tracker)
+    story.extend(list2_block)
+
+    # P1-2026-07-07: 末尾加 tracker summary
+    story.extend(tracker.summary_paragraph("本次采购意向报告"))
 
     # ── 页脚页眉 ──
     def on_page(canvas, doc):

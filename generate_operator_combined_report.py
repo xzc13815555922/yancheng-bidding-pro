@@ -254,6 +254,8 @@ def build_pdf(records: list, output_path: str, month_str: str, stats: dict):
         )
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+        # P1-2026-07-07: per-section try/except
+        from pdf_safe_section import safe_section, SafeSectionTracker
     except ImportError:
         print("❌ 需要 ReportLab: pip install reportlab")
         sys.exit(1)
@@ -502,9 +504,68 @@ def build_pdf(records: list, output_path: str, month_str: str, stats: dict):
         elements.append(Spacer(1, 2*mm))
         elements.append(P(f"共 {len(recs)} 条", "sub"))
 
-    for group in GROUP_ORDER:
+    # P1-2026-07-07: per-section try/except
+    # 集团清单（5 个集团）各包一层 safe_section，单集团异常不影响其他集团
+    tracker = SafeSectionTracker()
+
+    # 第 1 页 汇总 + 天眼查范围表 也会被 try/except 保护
+    # 但 elements 已在 functions 里 append 了，所以这里把整个 summary build
+    # 当作一个 section 包起来；难点是 build_pdf 调用 build_list_page 之后
+    # 才统一 doc.build()。重写思路：把"汇总" 之后的 5 个 list 切片逐个包。
+
+    # 实际改造：不在此处加 summary 包（汇总段已经在 build_pdf 主流程内），
+    # 而是逐个集团清单包 safe_section。
+    def _build_list_page_safe(group, period, records):
+        """对单个集团清单做 safe_section 包装"""
         grp_recs = [r for r in records if r["group"] == group]
-        build_list_page(f"{group}系中标清单　{period}", grp_recs)
+        # build_list_page 是内部函数，调用会 append 到 elements。
+        # 拆出 sectoin header + table 块，手动 append，外层 safe_section 包裹。
+        elements.append(PageBreak())
+        elements.append(P(f"{group}系中标清单　{period}", "section"))
+        elements.append(Spacer(1, 2*mm))
+        if not grp_recs:
+            elements.append(P("本期暂无数据", "cl"))
+            return
+        recs_sorted = sorted(grp_recs, key=lambda r: r["publish_date"], reverse=True)
+        hdr_row = [P(h, "hdr") for h in LIST_HDR]
+        rows = [hdr_row]
+        row_src = []
+        for r in recs_sorted:
+            winner_display = r["winner_short"] or (r["winner"][:18] if r["winner"] else r["winner_short"])
+            rows.append([
+                P(r["purchaser"][:20], "cl"),
+                P(r["publish_date"], "cc"),
+                P(r["project_name"][:52], "cl"),
+                P(fmt_amt(r["amount"]), "cc"),
+                P(winner_display[:18], "cl"),
+                P(src_label(r["source"]), "cc"),
+            ])
+            row_src.append(r["source"])
+        st = base_style()
+        for i, src in enumerate(row_src, 1):
+            bg = SRC_COLORS.get(src, ROW_ALT) if i % 2 == 0 else (
+                colors.HexColor("#f0f8f0") if src == "ybp" else
+                colors.HexColor("#fffaf0") if src == "tyc" else
+                colors.HexColor("#faf0ff")
+            )
+            st.append(("BACKGROUND", (0, i), (-1, i), bg))
+        t = Table(rows, colWidths=LIST_COL_W, repeatRows=1)
+        t.setStyle(TableStyle(st))
+        elements.append(t)
+        elements.append(Spacer(1, 2*mm))
+        elements.append(P(f"共 {len(grp_recs)} 条", "sub"))
+
+    # 逐个集团清单构造（被 safe_section 包起来，单集团异常不影响其他集团）
+    for group in GROUP_ORDER:
+        block = safe_section(
+            f"{group}系清单",
+            lambda g=group: _build_list_page_safe(g, period, records),
+            tracker=tracker,
+        )
+        elements.extend(block)
+
+    # P1-2026-07-07: 末尾加 tracker summary
+    elements.extend(tracker.summary_paragraph("本次运营商中标报告"))
 
     doc.build(elements)
     print(f"✅ PDF 已生成: {output_path}")
