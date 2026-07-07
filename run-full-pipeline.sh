@@ -103,6 +103,15 @@ $PYTHON build_unified.py || {
 }
 
 # ============================================
+# 第6.5步：重新提取 SME 标签 (P2-3 2026-07-07)
+# build_unified DROP+重建会清掉 sme_target 列提取的数据, 必须 build 后再跑一次
+# ============================================
+log "[Step 6.5/10] extract_sme_target.py (P2-3 修复: build_unified 后再跑一次)"
+$PYTHON extract_sme_target.py || {
+    log "⚠️  extract_sme_target 二次跑失败, SME 列可能为空"
+}
+
+# ============================================
 # 第7步：数据质量验证
 # ============================================
 log "[Step 7/10] verify_quality.py"
