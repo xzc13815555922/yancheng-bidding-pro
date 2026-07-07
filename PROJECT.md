@@ -1,237 +1,192 @@
 # 盐城市全域招标信息采集系统 Pro
-> 项目全景图 v0.2 | 2026-06-17 | 需求收集中，持续更新
+
+> 项目全景图 **v2.7** | 2026-07-07 | 同步至 README v2.7（2026-07-06）
+
+盐城市 12 个招标网站的全域采集、富化、关联、报告生成系统。覆盖招标/中标/采购意向/流标 4 类公告，含 PDF 月报、运营商综合月报、中小微专题、飞书群每日推送。
 
 ---
 
 ## 一、项目定位
 
-| 维度 | 现有 bidding-assistant | Pro 版（本项目） |
-|------|----------------------|----------------|
-| 覆盖范围 | 盐南高新区 + 经开区 | **盐城市全域** |
-| 数据库 | 单一合并 history.db | **每网站独立 .db** |
-| 入库字段 | 裁剪后的 ~26 列 | **全列入库 + raw_json** |
-| 公告类型 | 仅招标公告 | **4 类全采** |
-| 详情页 | 部分补充 | **全量补全关键字段** |
-| 实时推送 | 无 | **5 分钟级** |
-| 报告维度 | 仅月报 PDF | **县区维度 + 实时 + 月报** |
-| Web 前端 | 无 | **规划中** |
+| 维度 | bidding-assistant（旧） | **Pro v2.7** |
+|------|------------------------|--------------|
+| 覆盖范围 | 盐南 + 经开 | 盐城市**全域 12 站** |
+| 数据库 | 单一 history.db | 每站独立 DB + **unified.db 4 表** |
+| 公告类型 | 仅招标 | **4 类全采**（tender/award/intention/other）|
+| 详情页 | 部分 | 全量补全 + **本地 MD 缓存** |
+| 实时推送 | 无 | **每日 5:00 cron + 飞书群推送** |
+| 报告维度 | 仅月报 | **4 份 PDF**（招标/倒计时/意向/运营商综合）|
+| 关联分析 | 无 | **project_links**（tender×award 65%）+ project_chain 视图 |
+| 行业专题 | 无 | **中小微专题**（sme_target 三分类）|
+
+> **v2.7 更新 (2026-07-06)**：从"采集+月报"升级为"采集+富化+关联+专题+多维 PDF"完整流水线；代码量 **14181 行 / 60 .py 文件**。
 
 ---
 
 ## 二、系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       【采集层】12 个网站                         │
-│                                                                  │
-│  API直连类                    HTML解析类           Playwright类  │
-│  ┌──────────┐ ┌──────────┐   ┌────────┐ ...       ┌──────────┐ │
-│  │ 苏服采   │ │江苏招标  │   │政府采购│           │盐城公共  │ │
-│  │(4类)     │ │采购服务  │   │网(15栏)│           │资源交易网│ │
-│  └────┬─────┘ └────┬─────┘   └───┬────┘           └────┬─────┘ │
-│       │             │              │                    │        │
-│  ┌────▼─────────────▼──────────────▼────────────────────▼─────┐ │
-│  │              详情页补全（发包单位/预算/开标时间/截止时间）      │ │
-│  └─────────────────────────────┬───────────────────────────────┘ │
-└────────────────────────────────┼────────────────────────────────┘
-                                 │ 各自独立 .db
-┌────────────────────────────────▼────────────────────────────────┐
-│                       【存储层】                                  │
-│                                                                  │
-│  sufu.db  jszbcg.db  yancheng_gov.db  ycggzy.db  ...           │
-│  每个 DB 内：notices 主表（全列）+ enriched 补全表               │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │
-┌────────────────────────────────▼────────────────────────────────┐
-│                       【调度层】                                  │
-│                                                                  │
-│  每 5 分钟：增量采集 → 检测新条目 → 推送                         │
-│  每日：全量采集 + 月报生成                                        │
-└────────────────────────────────┬────────────────────────────────┘
-                                 │
-┌────────────────────────────────▼────────────────────────────────┐
-│                       【报告层】                                  │
-│                                                                  │
-│  实时推送（飞书/TBD）   县区维度报告   月报 PDF   Web 看板(TBD)  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────── 采集层 12 站 + 1 站天眼查 ────────────────────┐
+│  API直连(sufu/jszbcg/ycggzy) │ HTML解析(9站) │ Playwright(tyc)  │
+│            ↓ 详情页补全 + 本地 MD 缓存(data/pages/{site}/*.md)     │
+└─────────────────────────────┬──────────────────────────────────────┘
+                              ↓ 每站独立 .db（12 个）
+┌───────────── 存储层 unified.db 4 表 + 关联 + 视图 ────────────────┐
+│  tender 4010 / award 4361 / intention 1194 / other 3432            │
+│  + project_links 2843（关联率 65.2%）+ project_chain VIEW         │
+└─────────────────────────────┬──────────────────────────────────────┘
+                              ↓ build_project_links.py
+┌─────────────── 报告层 4 份 PDF + 1 份 Excel 备用 ─────────────────┐
+│  招标公告月报 / 采购意向月报 / 开标倒计时日报 / 运营商综合月报     │
+│  招标/意向 PDF 含 sme_target 中小微三色标记（v2.7）               │
+└─────────────────────────────┬──────────────────────────────────────┘
+                              ↓ run-full-pipeline.sh（10 步，55s）
+┌─────────────────── 推送层 cron 5:00 飞书群 ──────────────────────┐
+│  v2.6 实测 4/4 全绿（messageId om_x... 全部 ok:true）             │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+> **v2.7 更新 (2026-07-06)**：新增关联层（v2.6）+ 中小微专题（v2.7）+ 推送层实测稳定。
 
 ---
 
 ## 三、公告类型（4 类全采）
 
-| notice_type | 说明 | 核心字段 |
-|-------------|------|---------|
-| `tender` | 招标公告 | 开标时间、报名截止时间、预算金额 |
-| `intention` | 采购意向 / 预算公告 | 预计挂网时间、概算金额 |
-| `award` | 成交公告 / 中标通知 | 中标单位、中标金额 |
-| `other` | 变更 / 更正 / 终止 / 其他 | 字段不固定 |
+| notice_type | 中文 | unified 表 | 行数 | 关键覆盖 |
+|-------------|------|-----------|------|---------|
+| `tender` | 招标公告 | `tender` | 4010 | open_date 90% / budget 81% / std_district 98% |
+| `intention` | 采购意向 | `intention` | 1194 | budget 99% / **真项目名 98.7%**（v2.7 修复后） |
+| `award` | 成交/中标 | `award` | 4361 | winner 87%（sufu 0%）/ winning_amount 75% |
+| `other` | 流标/终止/更正/合同 | `other` | 3432 | notice_subtype 细分，整体流标率 12.2% |
+
+> **v2.7 更新 (2026-07-06)**：`other` 表 v2.6 新增；`project_links` 将 tender×award 关联（65% 覆盖），含 22% 链路带更正公告（平均 1.8 次）；平均招采周期 **20 天**，平均中标折扣率 **83.7%**。
 
 ---
 
 ## 四、12 个网站采集规划
 
-| # | 网站 | 简称 | 采集方式 | 当前 notice_type | Pro 补充 | 全域改造 |
-|---|------|------|---------|-----------------|---------|---------|
-| 1 | 盐城市政府采购网 | yancheng_gov | columnid API | 已有 15 栏（含成交/意向） | 补详情页关键字段 | 移除区县过滤 |
-| 2 | 苏服采 | sufu | POST API | 仅 serviceType=1 | 加 serviceType=2,3... | 改为全盐城市 areaCode |
-| 3 | 盐城市公共资源交易网 | ycggzy | Playwright+API | 招标计划/招标公告 | 加成交/中标结果 | 移除 areaCode 过滤 |
-| 4 | 江苏招标采购服务平台 | jszbcg | GET API | bulletinType=1 | 加 type=2,3,4... | regionCode=3209 已是全域 |
-| 5 | 城南新区公共资源交易网 | chennan | HTML | 招标公告 | 加成交/意向栏目 | 本站无需区域过滤 |
-| 6 | 开发区公共资源交易网 | kaifaqu | HTML | 招标公告 | 加成交/意向栏目 | 本站无需区域过滤 |
-| 7 | 盐城市大数据集团 | bigdata | HTML | 招标公告 | 加成交通知 | 本站无需区域过滤 |
-| 8 | 盐城市都市建设投资集团 | dushi | HTML | 招标公告 | 加成交通知 | 本站无需区域过滤 |
-| 9 | 盐城市东方集团 | dongfang | HTML | 招标公告 | 加成交通知 | 本站无需区域过滤 |
-| 10 | 江苏世纪新城 | jscn | HTML | 招标公告 | 加成交通知 | 本站无需区域过滤 |
-| 11 | 经开城发集团 | jingkai | HTML | 招标公告 | 加成交通知 | 本站无需区域过滤 |
-| 12 | 悦达集团 | yueda | HTML | 招标公告 | 加成交通知 | 本站无需区域过滤 |
+| # | 简称 | 中文名 | 方式 | 当前类型 | 状态 |
+|---|------|--------|------|---------|------|
+| 1 | jszbcg | 江苏招标采购服务平台 | API+PDF→MD | 4 类 | ✅ v2.7 open_date 真值修复 1683 条 |
+| 2 | yancheng_gov | 盐城市政府采购网 | columnid API | 4 类 | ✅ purchaser 98.3% / budget 27.2% |
+| 3 | ycggzy | 盐城公共资源交易 | SPA API | 4 类 | ✅ content 永久保留，winning_amount 30% |
+| 4 | sufu | 苏服采 | POST API | 4 类 | ⚠️ 中标 100% 空（详情 API 需登录） |
+| 5 | yueda | 悦达集团 | HTML | tender/award | ⚠️ 预算 97% 空 |
+| 6-10 | dongfang/jscn/dushi/chennan/kaifaqu | 5 家国企/区平台 | HTML | tender/award | ✅ |
+| 11 | bigdata | 盐城市大数据集团 | HTML | tender/award | ⚠️ 仅展示最近 10 页 |
+| 12 | jingkai | 经开城发集团 | HTML | tender/award | ✅ v2.6 新增 |
+| 附 | tyc | 天眼查运营商中标 | Playwright | award（运营商） | ✅ cron 5:00，--days 1 提速 11x |
+
+> **v2.7 更新 (2026-07-06)**：v2.6 新增 jingkai + bigdata 凑齐 12 站；`download_site_pages.py` 补 `import re` 隐藏 bug（#95），新数据 page_path 38.8%→77.0%。
 
 ---
 
 ## 五、数据库设计
 
-### 每网站独立 DB：`data/{site_key}.db`
+### 5.1 每站独立 DB（v0.2 设计保留）
 
-**主表：`notices`（统一核心字段 + 全量原始数据）**
+`data/{site}.db` 主表 `notices`：统一核心字段 + 全量 `raw_json` + `detail_fetched` 状态。**v2.7 新增**：tyc.db + yancheng_gov.db 加 `UNIQUE INDEX(detail_url)` 兜底去重。
+
+### 5.2 unified.db schema（v2.7 实测）
 
 ```sql
-CREATE TABLE notices (
-    -- 主键与来源
-    id          TEXT PRIMARY KEY,          -- md5(project_name+publish_date+site)
-    site        TEXT NOT NULL,             -- 网站简称
-    notice_type TEXT NOT NULL,             -- tender/intention/award/other
-    source_url  TEXT,                      -- 列表页URL
-    detail_url  TEXT,                      -- 详情页URL
+-- 4 张业务表（精简列）
+CREATE TABLE tender (id PK, site_name, std_district, proj_major_cat,
+    proj_minor_cat, publish_date, project_name, purchaser, budget,
+    open_date, deadline, detail_url);
+-- award / intention / other 结构类似
 
-    -- 时间
-    publish_date  DATE,
-    crawl_time    DATETIME DEFAULT CURRENT_TIMESTAMP,
-
-    -- 核心业务字段（所有类型共用，允许 NULL）
-    project_name  TEXT NOT NULL,
-    budget        REAL,
-    budget_text   TEXT,
-    budget_unit   TEXT,
-
-    -- 发包方
-    purchaser     TEXT,                    -- 发包单位（详情页补全）
-    purchaser_raw TEXT,                    -- API 原始字段
-
-    -- 类型专有字段（NULL 表示不适用）
-    open_date     DATETIME,                -- 开标时间（tender）
-    deadline      DATETIME,                -- 报名截止时间（tender）
-    expected_list DATE,                    -- 预计挂网时间（intention）
-    winner        TEXT,                    -- 中标单位（award）
-    winning_amount REAL,                   -- 中标金额（award）
-
-    -- 地域
-    region        TEXT,                    -- 县区（盐城市全域，不过滤）
-    district_code TEXT,                    -- 区县代码
-
-    -- 原始数据（全列备份，任何 API 字段都不丢失）
-    raw_json      TEXT,                    -- JSON dump of full API response record
-
-    -- 状态
-    detail_fetched INTEGER DEFAULT 0,      -- 0=未补全 1=已补全 2=补全失败
-    is_duplicate  INTEGER DEFAULT 0
+-- 关联层（v2.6 新增）
+CREATE TABLE project_links (
+    award_id PK REFERENCES award(id),
+    tender_id REFERENCES tender(id),
+    canonical_name, match_type, amendment_count DEFAULT 0
 );
 
-CREATE INDEX idx_publish_date  ON notices(publish_date);
-CREATE INDEX idx_notice_type   ON notices(notice_type);
-CREATE INDEX idx_region        ON notices(region);
-CREATE INDEX idx_detail_fetch  ON notices(detail_fetched);
+-- 链路视图（v2.6 新增，17 字段）
+CREATE VIEW project_chain AS
+SELECT t.id AS tender_id, a.id AS award_id, a.winner, a.winning_amount,
+       pl.match_type, pl.amendment_count,
+       julianday(a.publish_date) - julianday(t.publish_date) AS cycle_days
+FROM project_links pl JOIN tender t ON t.id=pl.tender_id
+                      JOIN award  a ON a.id=pl.award_id;
 ```
+
+> **v2.7 更新 (2026-07-06)**：unified.db 从"合并表"升级为"4 表 + 关联 + 视图"三层；`_dedup_tenders` 跨日去重（#117）；intention 真项目名 43.9%→98.7%（#128/#129）。
 
 ---
 
 ## 六、详情页补全策略
 
-补全任务在采集后异步执行（或同步，取决于速率限制）：
-
 ```
-采集列表 → 入库（detail_fetched=0）
-    └→ 补全队列：扫 detail_fetched=0 的条目
-           └→ 请求 detail_url
-                  └→ 解析：发包单位 / 预算 / 开标时间 / 截止时间 / 预计挂网时间
-                         └→ UPDATE notices SET ... detail_fetched=1
+采集列表 → 入库(detail_fetched=0)
+    └→ 拉 detail_url → 转 MD → 缓存 data/pages/{site}/{项目名}.md
+           └→ 解析：发包单位 / 预算 / 开标时间 / 截止时间
+                  └→ UPDATE ... detail_fetched=1
 ```
 
-反爬处理：
-- 请求间隔 0.5-1.5s 随机
-- 失败重试 3 次，超过标记 detail_fetched=2（跳过，不阻塞主采集）
+- **v1.4 起本地缓存**：重跑无需联网
+- **v2.6 解耦**：per-site 解析器迁入 `crawlers/{jszbcg,sufu}_parser.py`，主文件 1082→829 行
+- **反爬**：间隔 0.5-1.5s / 失败重试 3 次 / detail_fetched=2 跳过
+
+> **v2.7 更新 (2026-07-06)**：`reenrich.py` 补全统一入口（4 步调度）；`reenrich_jszbcg_open_date.py` 真开标时间解析（1683 条，99.9% 合理性）。
 
 ---
 
 ## 七、开发阶段规划
 
-### Phase 1（2026-06-17 完成）：采集框架 + API 类网站 + 6 月数据
-- [x] 项目全景图（PROJECT.md v0.2）
-- [x] `crawlers/base.py` — 统一基础类、per-site DB、notice_type、raw_json
-- [x] `crawlers/jszbcg.py` — 江苏招标采购服务平台（bulletinType 1/2/3/4/6，462条）
-- [x] `crawlers/yancheng_gov.py` — 政府采购网（15 栏全采，294条）
-- [x] `migrate_from_old.py` — 旧 history.db → Pro 各站 DB 迁移脚本
-- [x] 6 月全量采集完成，12 站独立 DB 建立，合计 923 条
-- [ ] `crawlers/sufu.py` — 苏服采（API 端口 868 今日超时，待单独补）
-- [ ] `crawlers/ycggzy.py` — 公共资源交易网（Playwright，待 Phase 2）
-- [ ] `run_collection.py` — 主采集入口（统一调度各站 Pro 采集器）
+| Phase | 时间 | 内容 | 状态 |
+|-------|------|------|------|
+| Phase 1 | 2026-06-17 | 采集框架 + API 站 | ✅ |
+| Phase 2 | 2026-06-25 | HTML 站 + 富化层 | ✅ |
+| Phase 2.5 | 2026-06-26 | unified.db 4 表 + project_links + view | ✅ |
+| Phase 3 | 2026-07-06 | cron + 飞书群 + 中小微 + 4 份 PDF | ✅ |
+| Phase 4 | 待排期 | Web 前端 + 跨站去重增强 | 🔵 |
 
-### Phase 2（待排期）：HTML 类网站
-- [ ] 城南新区、开发区、大数据集团、都市建设、东方集团、世纪新城、经开城发、悦达集团
-- [ ] 各站加成交/意向栏目
-
-### Phase 3（待排期）：实时调度
-- [ ] 5 分钟增量采集
-- [ ] 飞书推送新条目
-- [ ] 开标信息实时推送
-
-### Phase 4（待排期）：报告与 Web
-- [ ] 县区维度报告
-- [ ] 月报 PDF 适配
-- [ ] Web 看板（技术栈 TBD）
+> **v2.7 更新 (2026-07-06)**：Phase 2-3 全部从 v0.2 "待排期"超期完成；v2.7 累计修复 **#92-#131 共 40 项**（v0.2 时为 0）。
 
 ---
 
 ## 八、项目目录结构
 
 ```
-~/.openclaw/workspace/yancheng-bidding-pro/
-├── PROJECT.md                    # 本文件（项目全景图）
-├── data/                         # 数据库文件
-│   ├── sufu.db
-│   ├── jszbcg.db
-│   ├── yancheng_gov.db
-│   ├── ycggzy.db
-│   └── ...
+yancheng-bidding-pro/
+├── PROJECT.md / README.md / cleanup_orphan_dbs.py (P2-1 新增)
+├── data/  12 站 .db + unified.db + pages/ + pdfs/ + backup/
 ├── crawlers/
-│   ├── base.py                   # 基础类（DB管理 + 基础爬虫）
-│   ├── sufu.py                   # 苏服采
-│   ├── jszbcg.py                 # 江苏招标采购服务平台
-│   ├── yancheng_gov.py           # 盐城市政府采购网
-│   ├── ycggzy.py                 # 盐城市公共资源交易网（Playwright）
-│   ├── chennan.py                # 城南新区公共资源交易网
-│   ├── kaifaqu.py                # 开发区公共资源交易网
-│   ├── bigdata.py                # 盐城市大数据集团
-│   ├── dushi.py                  # 都市建设投资集团
-│   ├── dongfang.py               # 东方集团
-│   ├── jscn.py                   # 江苏世纪新城
-│   ├── jingkai.py                # 经开城发集团
-│   └── yueda.py                  # 悦达集团
-├── run_collection.py             # 主采集入口（全量 / 增量 / 单站）
-├── enrich_details.py             # 详情页补全（独立运行）
+│   ├── base.py / html_common.py
+│   ├── jszbcg_parser.py / sufu_parser.py  ← v2.6 解耦新增
+│   ├── {jszbcg,ycggzy,yancheng_gov,sufu}.py
+│   ├── {yueda,dongfang,jscn,dushi,chennan_kaifaqu,bigdata,jingkai}.py
+│   └── tyc_crawler.py / tyc_login.py
+├── tests/test_enrich_details.py  ← v2.6 单测
+├── enrich_details.py (829行, v2.6 解耦)
+├── reenrich.py / enrich_amendment_opendate.py / expand_intention.py
+├── extract_sme_target.py  ← v2.7 中小微专题新增
+├── build_unified.py / build_project_links.py
+├── add_std_district.py / add_std_category.py
+├── run_collection.py / export_excel.py (按需手动)
+├── report_failed_bids.py
+├── generate_{tender,intention,countdown_report,countdown_report_pdf,operator_award,operator_combined}_report.py
+├── rules/category.yaml (48 条, v2.5)
 └── logs/
 ```
 
----
-
-## 九、待确认项
-
-- [ ] 苏服采 serviceType 取值（除 1=招标 外，成交/意向对应哪个值）
-- [ ] 盐城市公共资源交易网成交/中标子分类 subcode
-- [ ] 5 分钟推送渠道（飞书群/DM/网站）
-- [ ] Web 前端技术栈与时间
-- [ ] 数据库是否保持 SQLite（单机） or 升级为 PostgreSQL（高并发查询）
-- [ ] 其他报告需求（用户仍在补充）
+> **v2.7 更新 (2026-07-06)**：v2.6-v2.7 共新增 6 个脚本（reenrich/extract_sme_target/build_project_links/report_failed_bids/expand_intention/enrich_amendment_opendate）+ tests/ 目录。
 
 ---
 
-*最后更新：2026-06-17 Phase 1 开发中*
+## 九、待确认项（v2.7 当前未决）
+
+- [ ] Web 前端技术栈（v0.2 延续）
+- [ ] 是否升级 PostgreSQL（当前 SQLite 够用）
+- [ ] 5 分钟级增量推送必要性（每日推送已满足）
+- [ ] 中小微专题深度（当前 13.8% tender 命中，是否做"中小微专属"PDF 子集？）
+- [ ] tyc 招投标数据会员续费（当前有效期至 2028 年）
+- [ ] 跨站 tender×award 复杂多包去重（v2.7 已用"采购包N"后缀剥离）
+
+> **v2.7 更新 (2026-07-06)**：v0.2 待确认 6 项中 3 项已确认（苏服采 serviceType ✅ / ycggzy subcode ✅ / 飞书群推送 ✅），3 项仍待定 + 3 项 v2.7 新增未决。
+
+---
+
+*最后更新：2026-07-07 P3-2 v0.2 → v2.7 同步完成*
