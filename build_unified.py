@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS tender (
     budget          REAL,   -- 预算金额（元）
     open_date       TEXT,   -- 开标时间
     deadline        TEXT,   -- 报名截止时间
-    detail_url      TEXT    -- 项目详情页链接
+    detail_url      TEXT,   -- 项目详情页链接
+    sme_target      TEXT    -- P2-3 (2026-07-07): 中小微标签 专门面向/非专门但优惠/不涉及
 )
 """
 
@@ -68,7 +69,8 @@ CREATE TABLE IF NOT EXISTS intention (
     purchaser       TEXT,
     budget          REAL,
     expected_list   TEXT,
-    detail_url      TEXT
+    detail_url      TEXT,
+    sme_target      TEXT    -- P2-3 (2026-07-07): 中小微标签
 )
 """
 
@@ -135,6 +137,7 @@ def load_site(db_path: Path):
                 r.get("open_date"),
                 r.get("deadline"),
                 r.get("detail_url"),
+                r.get("sme_target"),  # P2-3 (2026-07-07): 从 12 站 DB 直接透传 sme_target
             ))
         elif ntype == "award":
             awards.append((
@@ -171,6 +174,7 @@ def load_site(db_path: Path):
                                 sub.get("budget_yuan"),
                                 sub.get("expected_month"),
                                 r.get("detail_url"),
+                                r.get("sme_target"),  # P2-3
                             ))
                         expanded = True
                 except Exception as e:
@@ -212,6 +216,7 @@ def load_site(db_path: Path):
                     final_budget,
                     single_month or (elist_raw if not elist_raw.startswith("[") else None),
                     r.get("detail_url"),
+                    r.get("sme_target"),  # P2-3
                 ))
         elif ntype == "other":
             name = r.get("project_name") or ""
@@ -339,6 +344,17 @@ def build():
     uconn.execute(DDL_OTHER)
     for idx in DDL_INDEXES:
         uconn.execute(idx)
+    # P2-3 (2026-07-07): 兜底 ALTER TABLE 加 sme_target 列（老库已存在但 DDL 没这列时）
+    # DDL 已用 IF NOT EXISTS 不会覆盖老库，新老兼容用 try/except 包裹
+    for alter_sql in [
+        "ALTER TABLE tender ADD COLUMN sme_target TEXT",
+        "ALTER TABLE intention ADD COLUMN sme_target TEXT",
+    ]:
+        try:
+            uconn.execute(alter_sql)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):
+                logger.warning(f"build_unified ALTER 异常: {e}")
     uconn.commit()
 
     total_t = total_a = total_i = total_o = 0
@@ -348,8 +364,8 @@ def build():
         tenders, awards, intentions, others = load_site(DATA_DIR / f"{site}.db")
         # P1-2026-07-06: 站点内 tender 按 (detail_url, publish_date) 去重
         deduped_site_tenders, _ = _dedup_tenders(tenders)
-        uconn.executemany("INSERT OR REPLACE INTO tender VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", deduped_site_tenders)
-        uconn.executemany("INSERT OR REPLACE INTO intention VALUES (?,?,?,?,?,?,?,?,?,?,?)", intentions)
+        uconn.executemany("INSERT OR REPLACE INTO tender VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", deduped_site_tenders)
+        uconn.executemany("INSERT OR REPLACE INTO intention VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", intentions)
         uconn.executemany("INSERT OR REPLACE INTO other VALUES (?,?,?,?,?,?,?,?,?,?)", others)
         uconn.commit()
         all_awards.extend(awards)
