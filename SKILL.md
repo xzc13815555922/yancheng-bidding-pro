@@ -219,6 +219,32 @@ python3 enrich_yancheng_gov.py
 
 **日志**：详见 `logs/fix_unique_index_20260707_*.log` 与 git commit `c23a6cb`。
 
+### P1-1: make_id 多次"采购包"/全角括号/"标段 N"边界修复
+
+| # | 站点/文件 | 问题 | 根因 | 修复 | 效果 |
+|---|----------|------|------|------|------|
+| 132 | `crawlers/base.py:24-31` `make_id` | 3 个边界 bug：<br>- BUG-01：多次"采购包"只剥最后一次（如"XX项目采购包1 采购包2"→ 剩 "XX项目采购包1"）<br>- BUG-02：全角括号"（采购包1）"未剥离<br>- BUG-03："标段 N"/"包 N"未剥离 | v2.6 #98 修复的正则 `r'(\S*采购包\s*\d+\s*)$'` 只错一次，只匹配"采购包"，不覆盖全角括号/标段/包 | (1) 新增模块常量 `PACKAGE_SUFFIX_RE = re.compile(r'[\s（(]*(?:采购包\|标段\|包)\s*\d+\s*[)）]?\s*$')` (2) `make_id` 改为 `while` 循环反复 sub 直到稳定（多次采购包全部剥） | ycggzy 4346 notices 改后能合并 123 个老 ID（逆推未来新入库可减少 ~2.8% 重复） |
+| 133 | 受益站点 | ycggzy（4346 条 notices，重复合并 123 个老 ID）/ yancheng_gov / 其它 11 站 | `make_id` 是所有 `SiteDB.insert` 的主键生成器 | 同上 | 新入库时多次采购包公告会合并 ID（业务去重） |
+| 134 | 边界 case 压力测试 | 17 个 edge case | 防回归 | 验证全部通过 | 中文数字/字母/嵌套括号/非末尾 采购包 全部正确处理 |
+
+**验证命令**（azE Step 2）：
+```python
+from crawlers.base import make_id as m
+tests = [
+    ('XX项目采购包1 采购包2', '2026-07-01', 'ycggzy'),  # BUG-01
+    ('XX项目采购包1',         '2026-07-01', 'ycggzy'),
+    ('XX项目（采购包1）',     '2026-07-01', 'ycggzy'),  # BUG-02
+    ('XX项目',                '2026-07-01', 'ycggzy'),
+    ('XX项目标段1',           '2026-07-01', 'ycggzy'),  # BUG-03
+    ('XX项目包3',             '2026-07-01', 'ycggzy'),  # BUG-03 简化版
+]
+# 全部输出 ✅，且 6 个 ID 都等于 `b5d0379ed87fd9926dc803d30d888db0`（XX项目基准）
+```
+
+**注意点**：`build_unified.py` 不用 `make_id` 做 award 去重，它有自己的 `_norm_award_name`（`\s*采购包\d+$` 和 `\s*[（(]\s*\d+\s*[)）]$`）。所以 P1-1 修复**不直接影响 unified.db award 总数**，主要受益是**未来 site DB 入库时去重增强**。
+
+**日志**：详见 git commit `04cf830`。
+
 ---
 
 ## 本轮修复清单（v2.5 → v2.6，2026-07-06）
