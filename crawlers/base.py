@@ -24,6 +24,13 @@ DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
+# ── UNIQUE INDEX 白名单 ────────────────────────────────────────────
+# P0-1 (2026-07-07): 仅对下列站加 idx_notices_detail_url UNIQUE INDEX
+# 其它站（ycggzy/dushi/chennan 等）的 notices 会跨日发布/变更，
+# 同一 detail_url 出现多个 publish_date 是合法业务，不应阻断采集。
+# 配套迁移脚本: fix_unique_index_scope.py
+UNIQUE_INDEX_SITES = {'jszbcg', 'yancheng_gov', 'tyc'}
+
 
 class SiteDB:
     """
@@ -66,7 +73,7 @@ class SiteDB:
     CREATE INDEX IF NOT EXISTS idx_detail       ON notices(detail_fetched);
     CREATE INDEX IF NOT EXISTS idx_site         ON notices(site);
     -- P1-2026-07-06: detail_url 唯一索引，兑底防止同公告重复入库（项目名 '采购包N' 问题）
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_notices_detail_url ON notices(detail_url) WHERE detail_url IS NOT NULL;
+    -- P0-1 (2026-07-07): UNIQUE INDEX 改为按白名单动态加，见 _init() 末尾
     """
 
     def __init__(self, site_key: str):
@@ -92,6 +99,15 @@ class SiteDB:
                 conn.commit()
             except Exception:
                 pass
+
+        # P0-1 (2026-07-07): UNIQUE INDEX 仅对白名单站生效
+        # 配套迁移脚本: fix_unique_index_scope.py (历史 DB 改白名单也用)
+        if self.site_key in UNIQUE_INDEX_SITES:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_notices_detail_url "
+                "ON notices(detail_url) WHERE detail_url IS NOT NULL"
+            )
+            conn.commit()
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
