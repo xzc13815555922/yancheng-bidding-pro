@@ -44,7 +44,10 @@ def safe_section(
         tracker: 可选 SafeSectionTracker，自动记 1 次失败
 
     Returns:
-        list[Flowable]: 成功时是 fn() 的返回，失败时是包含警告段落 + spacer 的 list
+        list[Flowable]: 成功时是 fn() 的返回；失败时是包含警告段落 + spacer 的 list
+        ⚠️ 调用方区分"成功返回数据" vs "失败 fallback" 应检查列表里是否有 WARN_PARA 标记
+           推荐用返回值首元素 isinstance(Paragraph) + 检查 style.name == 'WarnStyle'，
+           或更简单：把 fallback 段落长度定为 2，且首元素是 Paragraph。
     """
     try:
         result = fn()
@@ -80,6 +83,19 @@ def safe_section(
             # 极端情况：连 reportlab 都不可用（导入失败），返回空 list
             logger.error(f"[PDF section] {name} fallback 段落构造也失败: {inner_e}")
             return []
+
+
+def is_fallback_block(block: list) -> bool:
+    """判断 safe_section 返回的 list 是否是 fallback（异常 fallback）"""
+    if not block or len(block) < 2:
+        return False
+    try:
+        from reportlab.platypus import Paragraph
+        if not isinstance(block[0], Paragraph):
+            return False
+        return getattr(block[0].style, "name", "") == "WarnStyle"
+    except Exception:
+        return False
 
 
 class SafeSectionTracker:
