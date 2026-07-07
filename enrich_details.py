@@ -203,9 +203,14 @@ def _clean_purchaser_val(val: str) -> str:
 
 
 def _is_valid_purchaser(name: str) -> bool:
-    """简单校验提取结果是否像真实机构名，过滤法条/资格要求误匹配。"""
-    if not name or len(name) < 4:
+    """简单校验提取结果是否像真实机构名，过滤法条/资格要求误匹配。
+    P1-2026-07-07: 3-8 字单位白名单前置（"上海局"/"国家能源局"/"清华大学"等）
+    直接通过；3 字以下或 8 字以上仍需走完整过滤。"""
+    if not name or len(name) < 3:
         return False
+    # P1-2026-07-07: 3-8 字以机构后缀结尾的直接通过（白名单前置，避免被其他规则误杀）
+    if 3 <= len(name) <= 8 and re.search(r'(局|院|办|会|中心|公司|集团)$', name):
+        return True
     # 以编号/括号/数字/圈号开头 → 来自列表条款而非机构名
     if re.match(r'^[(（\d一二三四五六七八九十]', name):
         return False
@@ -493,8 +498,8 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                         result["budget_unit"] = "元"
                         result["budget_text"] = m.group(0)[:40]
                         break
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    logger.warning(f'[safe_float] L496 {e}')
 
     # 时间字段
     if notice_type in ("tender", "other"):
@@ -646,8 +651,8 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                                 break
                     if winner_val:
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f'[enrich_request_fail] L649 {e}')
         if not winner_val:
             # Markdown 管道表格（_clean 后换行变空格）
             # 格式: 供应商名称 | ... | 中标/成交金额 ---|---...|--- 1 | 江苏XXX | ... | 2695000元
@@ -796,8 +801,8 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
                                     "UPDATE notices SET page_path=? WHERE id=?", (saved, rid)
                                 )
                                 conn.commit()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f'[enrich_outer_loop] L799 {e}')
                     else:
                         status = 2
                 except Exception as e:
