@@ -206,6 +206,21 @@ python3 enrich_yancheng_gov.py
 
 ---
 
+## 本轮修复清单（v2.6 → v2.7，2026-07-07）
+
+### P0-1: UNIQUE INDEX 白名单化（修复 7/7 cron 实证 3 站采集失败）
+
+| # | 站点/文件 | 问题 | 根因 | 修复 | 效果 |
+|---|----------|------|------|------|------|
+| 130 | `crawlers/base.py` | 7/7 05:15 cron 实证 ycggzy/dushi/chennan 3 站采集全失败：`UNIQUE constraint failed: notices.detail_url` | v2.6 (7/6) `idx_notices_detail_url` UNIQUE INDEX 给了所有 12 站；但 ycggzy/dushi/chennan 的 notices 会跨日变更（同 detail_url 多 publish_date 是合法业务），`SiteDB(site_key)._init()` 跑 `CREATE UNIQUE INDEX` 直接抛 IntegrityError → ycggzy.py:507 `super().__init__()` 整体失败 | (1) `base.py` 加白名单常量 `UNIQUE_INDEX_SITES = {'jszbcg', 'yancheng_gov', 'tyc'}`  (2) SCHEMA 移除 UNIQUE INDEX 行  (3) `SiteDB._init()` 末尾按白名单动态建 UNIQUE INDEX | ycggzy 实例化成功（7/7 cron 失败原因根治）；jszbcg/yancheng_gov/tyc 仍有 UNIQUE INDEX（双保险去重生效） |
+| 131 | `fix_unique_index_scope.py`（新增 200 行）| 历史 DB 已有 UNIQUE INDEX 的非白名单站（bigdata/dongfang/jingkai/jscn/kaifaqu/sufu/yueda 7 站）需手动清理 | 脚本一次跑：白名单站 KEEP / 非白名单站 DROP UNIQUE INDEX（保留普通索引）；支持 `--dry-run`；幂等；日志 `logs/fix_unique_index_*.log` | 7/7 真跑：KEEP=3 / DROP=7 / NOOP=3 (ycggzy/dushi/chennan 本就没索引) / ERROR=0；再跑一次全 NOOP |
+
+**白名单依据**：SKILL.md 第 221 行 v2.6 修复记录已明确"跨日期合法业务（ycggzy/dushi/chennan）不加 UNIQUE INDEX"——本次修复回归设计意图。
+
+**日志**：详见 `logs/fix_unique_index_20260707_*.log` 与 git commit `c23a6cb`。
+
+---
+
 ## 本轮修复清单（v2.5 → v2.6，2026-07-06）
 
 ### P0 重复入库修复（tyc + yancheng_gov + unified）
