@@ -18,6 +18,16 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# ── make_id 后缀剥离正则 ──────────────────────────────
+# P1-1 (2026-07-07): 覆盖 3 个边界 bug
+#   BUG-01: 多次"采购包"只剥最后一次（如"XX项目采购包1 采购包2"）
+#   BUG-02: 全角括号未剥离（如"XX项目（采购包1）"）
+#   BUG-03: "标段 N"未剥离（如"XX项目标段1"）
+# 正则说明: 匹配 "采购包|标段|包" + 可选全/半角括号 + 空格 + 数字 + 结束
+PACKAGE_SUFFIX_RE = re.compile(
+    r'[\s（(]*(?:采购包|标段|包)\s*\d+\s*[)）]?\s*$'
+)
+
 DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
@@ -97,8 +107,8 @@ class SiteDB:
             try:
                 conn.execute(f"ALTER TABLE notices ADD COLUMN {col_def}")
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f'[site_db_init_alter_table] L100 {e}')
 
         # P0-1 (2026-07-07): UNIQUE INDEX 仅对白名单站生效
         # 配套迁移脚本: fix_unique_index_scope.py (历史 DB 改白名单也用)
@@ -109,10 +119,22 @@ class SiteDB:
             )
             conn.commit()
 
+        # P0-4 (2026-07-07): 启用 WAL 模式 + busy_timeout + synchronous=NORMAL
+        # WAL 允许读写并发（采集读 + 补全写不互相阻塞），并防 12 站并发采集时 SQLITE_BUSY
+        # 配套迁移脚本: enable_wal_mode.py (历史 DB 改 WAL 也用)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=5000')
+        conn.execute('PRAGMA synchronous=NORMAL')
+
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(str(self.db_path))
             self._conn.row_factory = sqlite3.Row
+            # P0-4 (2026-07-07): 启用 WAL 模式 + busy_timeout + synchronous=NORMAL
+            # PRAGMA 是 per-connection 的，必须每次新建连接都设一次
+            self._conn.execute('PRAGMA journal_mode=WAL')
+            self._conn.execute('PRAGMA busy_timeout=5000')
+            self._conn.execute('PRAGMA synchronous=NORMAL')
         return self._conn
 
     def insert(self, record: Dict) -> bool:
@@ -227,11 +249,21 @@ class SiteDB:
 
 
 def make_id(project_name: str, publish_date: str, site: str) -> str:
-    """生成唯一 ID。修复 P1-2026-07-06：上游某些站点会把同一项目的'主公告'和
-    '采购包N'公告分别发布，导致 project_name 尾部带'采购包N'的两条记录
-    ID 不同而被重复入库。现对 project_name 去掉尾部后缀再哈希。
+    """生成唯一 ID。修复 P1-2026-07-06 + P1-1 (2026-07-07)：
+    - P1-2026-07-06：剥离尾部"采购包N"避免同项目主公告/包公告 ID 不同重复入库
+    - P1-1 (2026-07-07)：扩展为 PACKAGE_SUFFIX_RE，修复 3 边界 bug：
+        BUG-01 多次"采购包"全部剥（如"XX项目采购包1 采购包2"→"XX项目"）
+        BUG-02 全角括号"（采购包1）"也剥
+        BUG-03 "标段N"/"包N"也剥
+    实现注意：单次 .sub() 只剥末尾一次。多次"采购包"需反复 sub 直到稳定。
     受益站点：ycggzy、yancheng_gov 等。tyc 爬虫另外有自己的 make_id（已在 7/6 同步修复）。"""
-    base_name = re.sub(r'(采购包\s*\d+\s*)$', '', project_name or '').strip()
+    name = project_name or ''
+    while True:
+        new_name = PACKAGE_SUFFIX_RE.sub('', name).strip()
+        if new_name == name:
+            break
+        name = new_name
+    base_name = name
     # 防 None/空: 加 site 字段保底，但本身仍会冲突。调用方应过滤空 project_name。
     raw = f"{base_name or '_empty_'}|{publish_date or ''}|{site}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
@@ -258,8 +290,8 @@ class BaseCrawler:
                 totals["total"] += result.get("total", 0)
                 totals["new"] += result.get("new", 0)
                 totals["by_type"][ntype] = result
-            except NotImplementedError:
-                pass
+            except NotImplementedError as e:
+                logger.warning(f'[make_id_strip_suffix] L261 {e}')
             except Exception as e:
                 self.logger.error(f"{self.SITE_NAME} crawl_type={ntype} 失败: {e}")
         return totals
