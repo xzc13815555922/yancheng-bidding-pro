@@ -9,9 +9,12 @@ build_unified.py — 将12个站点 DB 汇总为统一数据库
   other     流标/终止/更正等（含 notice_subtype 细分）
 """
 import json as _json
+import logging
 import sqlite3
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
 from html_common import classify_other_subtype
@@ -170,8 +173,8 @@ def load_site(db_path: Path):
                                 r.get("detail_url"),
                             ))
                         expanded = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[intention_expand_multi] L176 {e}')
             if not expanded:
                 # 单项 JSON 数组 → 也展开为单条, 用真项目名
                 # 修正 P3-2026-07-06 (CEO 反馈): 单项目批次也需用 expected_list[0].name 替代批次标题
@@ -186,8 +189,8 @@ def load_site(db_path: Path):
                             single_month = sub_items[0].get("expected_month")
                             single_name = sub_items[0].get("name")
                             single_budget = sub_items[0].get("budget_yuan")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f'[intention_single_name_parse] L192 {e}')
                 # 如果子项 name 不与批次名相同, 用子项 name (避免与 build_unified id 冲突)
                 if single_name and single_name != r.get("project_name"):
                     final_name = single_name
@@ -219,8 +222,8 @@ def load_site(db_path: Path):
                 try:
                     _d = _json.loads(_rj)
                     _type_hint = str(_d.get("typeName") or _d.get("type_name") or "")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[other_raw_json_type_hint] L225 {e}')
             others.append((
                 r.get("id"),
                 site_name,
@@ -241,11 +244,28 @@ def load_site(db_path: Path):
 import re as _re
 
 def _norm_award_name(name: str) -> str:
-    """去重用标准化名：去掉末尾的 采购包N、标段N、中标公告/成交公告 等噪音后缀。"""
-    n = name or ""
-    n = _re.sub(r'\s*采购包\d+$', '', n).strip()
-    n = _re.sub(r'\s*[（(]\s*\d+\s*[)）]$', '', n).strip()
-    return n
+    """去重用标准化名：去掉末尾的 采购包N、标段N、中标公告/成交公告、补充 等噪音后缀。
+    P1-2026-07-07: 加 "补充"/"（补充）" 末尾剥离（小安 BUG-05）；正则也加全/半角括号+N 末尾。
+    实现注意: 末尾可能多重嵌套（如"XX项目（1）（补充）"需剥两次），用单个 while 循环
+    交替跑 4 个 pattern 反复 sub 直至稳定。"""
+    name = (name or "").strip()
+    patterns = [
+        # 末尾 "（N）" / "(N)"
+        r'[（(]\d+[)）]\s*$',
+        # 末尾 "（补充）" / "(补充)"
+        r'\s*[（(]补充[)）]\s*$',
+        # 末尾 "补充"（无括号）
+        r'\s*补充\s*$',
+        # 末尾 "采购包N"（v2.6 修复）
+        r'\s*采购包\d+\s*$',
+    ]
+    while True:
+        prev = name
+        for pat in patterns:
+            name = _re.sub(pat, '', name).strip()
+        if name == prev:
+            break
+    return name
 
 
 def _dedup_tenders(tenders: list) -> tuple[list, int]:
@@ -281,13 +301,18 @@ def _award_score(rec: tuple) -> int:
 
 def _dedup_awards(awards: list) -> tuple[list, int]:
     """
-    跨站去重：同标准化项目名 + 发布日期，保留最优一条（优先无包号 + 字段完整）。
+    跨站去重：同标准化项目名 + 月份（YYYY-MM），保留最优一条（优先无包号 + 字段完整）。
+    P1-2026-07-07: 改为按月分组而非按日。同项目跨日变更（合同履行/状态切换/同月多次发布）
+    现在会合并；跨月视为不同项目（detail_url/winner 通常不同）。
+
     返回 (去重后列表, 丢弃数量)
     """
     from collections import defaultdict
     groups: dict = defaultdict(list)
     for rec in awards:
-        key = (_norm_award_name(rec[6]), rec[5])   # (标准化名, publish_date)
+        # P1-2026-07-07: 改用 YYYY-MM 而非完整日期
+        month_key = (rec[5] or "")[:7]
+        key = (_norm_award_name(rec[6]), month_key)
         groups[key].append(rec)
 
     result = []
