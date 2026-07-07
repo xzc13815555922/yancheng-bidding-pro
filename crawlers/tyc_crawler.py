@@ -282,8 +282,8 @@ def detect_login(page) -> bool:
                 if page.locator(sel).first.count() > 0:
                     return False
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'[store_md_save_fail] L285 {e}')
     return False
 
 
@@ -296,8 +296,8 @@ def detect_anti_crawl(page) -> bool:
         for t in ["验证码", "滑块验证", "安全验证", "请完成验证", "访问频率过高"]:
             if t in body:
                 return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'[store_insert_fail] L299 {e}')
     return False
 
 
@@ -380,8 +380,8 @@ def has_next_page(page) -> bool:
             parent = page.locator("div.num:has(i.tic-laydate-next-m)").first
             if parent.count() > 0 and "disabled" not in (parent.get_attribute("class") or ""):
                 return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'[parse_jingzhuang_inner_text] L383 {e}')
     return False
 
 
@@ -402,8 +402,8 @@ def click_next_page(page, current: int) -> bool:
                         if active == str(current + 1):
                             time.sleep(0.5)
                             return True
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f'[parse_jingzhuang_inner_text_timeout] L405 {e}')
                     time.sleep(0.3)
                 time.sleep(2)
                 return True
@@ -418,8 +418,8 @@ def collect_company(page, company: dict, days: int = None) -> list:
     page.goto(url, wait_until="commit")
     try:
         page.wait_for_selector("table, [class*='table-container'], [class*='pagination']", timeout=20000)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'[collect_company_outer] L421 {e}')
     time.sleep(3)
 
     if detect_login(page):
@@ -438,8 +438,8 @@ def collect_company(page, company: dict, days: int = None) -> list:
     while True:
         try:
             page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'[collect_company_retry] L441 {e}')
         time.sleep(2)
 
         records = parse_jingzhuang_page(page, company)
@@ -571,12 +571,16 @@ def main():
         cutoff = (datetime.now() - timedelta(days=args.days)).strftime("%Y-%m-%d")
         logger.info(f"时间窗口: {cutoff} 至今")
 
-    p, browser, context = create_context()
-    context.add_cookies(cookies)
-    page = context.new_page()
-
+    # P1-2026-07-07: 外层 try/finally 包住 create_context() 防浏览器泄露
+    # 预声明 None 避免 close 阶段 NameError（比 'name' in dir() 更安全）
+    p = browser = context = page = None
+    # 预声明 total_stats 字典；异常路径上保持 0 值，最后汇总日志不会 UnboundLocalError
     total_stats = {"total": 0, "new": 0, "yancheng": 0, "md_saved": 0}
     try:
+        p, browser, context = create_context()  # 这行可能被扔异常（cookies 缺失/网络失败）
+        context.add_cookies(cookies)
+        page = context.new_page()
+
         for company in companies:
             records = collect_company(page, company, days=args.days)
             if records is None:
@@ -594,10 +598,30 @@ def main():
             )
 
             time.sleep(random.uniform(DELAY_BASE, DELAY_BASE + DELAY_JITTER))
+    except Exception as e:
+        logger.error(f"采集流程异常: {e}")
     finally:
-        browser.close()
-        p.stop()
-        conn.close()
+        # P1-2026-07-07: 每个 close 单独 try，避免前一个失败影响后续释放
+        # 原代码只 close browser/p/conn，缺 context.close() → context 句柄泄露
+        try:
+            if context:
+                context.close()
+        except Exception as e:
+            logger.warning(f"context.close 失败: {e}")
+        try:
+            if browser:
+                browser.close()
+        except Exception as e:
+            logger.warning(f"browser.close 失败: {e}")
+        try:
+            if p:
+                p.stop()
+        except Exception as e:
+            logger.warning(f"p.stop 失败: {e}")
+        try:
+            conn.close()
+        except Exception as e:
+            logger.warning(f"conn.close 失败: {e}")
 
     logger.info(
         f"\n📊 汇总: 原始{total_stats['total']} 新增{total_stats['new']} "
