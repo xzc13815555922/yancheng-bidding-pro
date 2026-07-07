@@ -324,7 +324,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
         if m:
             val = m.group(0).strip()
             val = _clean_purchaser_val(val)
-            if 4 < len(val) < 45 and _is_valid_purchaser(val):
+            if 3 <= len(val) < 45 and _is_valid_purchaser(val):  # P1-3-ext B 2026-07-07: 4<→3<= 真放 3 字
                 result["purchaser"] = val
 
     # 敘事句兜底：无标签页面的几种常见格式
@@ -598,7 +598,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             m_org = re.match(rf'.{{2,40}}?(?:{_ORG_SUFFIX})', val)
             if m_org:
                 val = m_org.group(0).strip()
-            if 4 < len(val) < 50 and _ORG_PATTERN.search(val):
+            if 3 <= len(val) < 50 and _ORG_PATTERN.search(val):  # P1-3-ext B 2026-07-07
                 # jszbcg "中标人：详见公告内容..." 型伪值
                 if not re.search(r'^详见|见公示|见公告|类型投标报价', val):
                     winner_val = val
@@ -614,7 +614,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                 m_c2 = re.match(rf'.{{2,40}}?(?:{_ORG_SUFFIX})', v)
                 if m_c2:
                     v = m_c2.group(0).strip()
-                if _ORG_PATTERN.search(v) and 4 < len(v) < 50:
+                if _ORG_PATTERN.search(v) and 3 <= len(v) < 50:  # P1-3-ext B 2026-07-07
                     winner_val = v
         if not winner_val:
             # 政府采购网表格格式：中标/成交金额\n1\t供应商名称...
@@ -625,7 +625,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             )
             if m:
                 val = m.group(1).strip()
-                if 4 < len(val) < 50:
+                if 3 <= len(val) < 50:  # P1-3-ext B 2026-07-07
                     winner_val = val
         if not winner_val:
             # ewb/table 格式：表头含"中标单位"，值在同行数据格中
@@ -642,7 +642,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
                         cells = [td.get_text(strip=True) for td in tr.find_all(['th', 'td'])]
                         if w_idx < len(cells):
                             v = cells[w_idx]
-                            if v and _ORG_PATTERN.search(v) and 4 < len(v) < 50:
+                            if v and _ORG_PATTERN.search(v) and 3 <= len(v) < 50:  # P1-3-ext B 2026-07-07
                                 winner_val = v
                                 if a_idx and a_idx < len(cells) and 'winning_amount' not in result:
                                     amt, _ = _parse_amount(cells[a_idx])
@@ -662,7 +662,7 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
             )
             if m_md:
                 v = m_md.group(2).strip()
-                if _ORG_PATTERN.search(v) and 4 < len(v) < 50 and _is_valid_purchaser(v):
+                if _ORG_PATTERN.search(v) and 3 <= len(v) < 50 and _is_valid_purchaser(v):  # P1-3-ext B 2026-07-07
                     winner_val = v
                     tail = text[m_md.end():]
                     m_amt = re.search(r'([\d,.]+)\s*(万元|亿元|元)', tail[:200])
