@@ -6,10 +6,15 @@
 """
 
 import os, sys, re, sqlite3
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from pdf_safe_section import safe_section, is_fallback_block, SafeSectionTracker
+
+logger = logging.getLogger(__name__)
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -131,7 +136,8 @@ def month_records(first: str, last: str) -> List[dict]:
 # ---------- 页面构建 ----------
 
 def page1_summary(f: str, report_month: str, first: str, last: str,
-                  today: str, yesterday: str, all_records: List[dict]) -> list:
+                  today: str, yesterday: str, all_records: List[dict],
+                  tracker: SafeSectionTracker = None) -> list:
     """第1页:招标公告汇总表"""
     story = []
 
@@ -171,23 +177,44 @@ def page1_summary(f: str, report_month: str, first: str, last: str,
     ]]
 
     total_td = total_yd = total_unc = total_cls = 0
+    if tracker is None:
+        tracker = SafeSectionTracker()
 
     for site in SITE_ORDER:
-        td  = site_count_unclassified(site, today)
-        yd  = site_count_unclassified(site, yesterday)
-        unc = month_unclassified.get(site, 0)
-        cls = month_classified.get(site, 0)
-        total_td  += td
-        total_yd  += yd
-        total_unc += unc
-        total_cls += cls
+        # P1-2026-07-07: 单站查询异常只缺该站行，其他站仍正常显示
+        def _build_row(s=site):
+            td  = site_count_unclassified(s, today)
+            yd  = site_count_unclassified(s, yesterday)
+            unc = month_unclassified.get(s, 0)
+            cls = month_classified.get(s, 0)
+            return {
+                "td": td, "yd": yd, "unc": unc, "cls": cls,
+                "td_yd_str": f"{td} / {yd}" if (td or yd) else "-",
+            }
 
-        td_yd_str = f"{td} / {yd}" if (td or yd) else "-"
+        row_block = safe_section(f"站点 {site}", _build_row, tracker=tracker)
+        if is_fallback_block(row_block):
+            # 该站异常：插入占位行（"⚠️ 查询失败"），表仍连贯
+            tbl_data.append([
+                Paragraph(site, _style(f, f"sn{site}_err", fontSize=9,
+                                       alignment=TA_LEFT, leading=12, textColor="#B22222")),
+                Paragraph("⚠️ 查询失败", cv),
+                Paragraph("-", cv),
+                Paragraph("-", cv),
+                Paragraph(SITE_FILTER.get(site, "-"), cl),
+            ])
+            continue
+        # 成功：row_block = [dict]
+        r = row_block[0]
+        total_td  += r["td"]
+        total_yd  += r["yd"]
+        total_unc += r["unc"]
+        total_cls += r["cls"]
         tbl_data.append([
             Paragraph(site, _style(f, f"sn{site}", fontSize=9, alignment=TA_LEFT, leading=12)),
-            Paragraph(td_yd_str, cv),
-            Paragraph(str(unc) if unc else "-", cv),
-            Paragraph(str(cls) if cls else "-", cv),
+            Paragraph(r["td_yd_str"], cv),
+            Paragraph(str(r["unc"]) if r["unc"] else "-", cv),
+            Paragraph(str(r["cls"]) if r["cls"] else "-", cv),
             Paragraph(SITE_FILTER.get(site, "-"), cl),
         ])
 
@@ -303,13 +330,16 @@ def _site_section(f: str, site: str, rows: List[dict]) -> list:
     return items
 
 
-def detail_pages(f: str, all_records: List[dict]) -> list:
+def detail_pages(f: str, all_records: List[dict], tracker: SafeSectionTracker = None) -> list:
     """第2页起:
     - 12个网站全部显示(无数据显示暂无提示)
     - 记录数 >= LARGE_SITE_THRESHOLD 的网站单独一页
     - 其余网站连续排列,ReportLab自动续页
+    - P1-2026-07-07: 单站渲染异常仅丢该站，其他站正常显示
     """
     story = []
+    if tracker is None:
+        tracker = SafeSectionTracker()
 
     by_site: Dict[str, List[dict]] = defaultdict(list)
     for r in all_records:
@@ -331,14 +361,24 @@ def detail_pages(f: str, all_records: List[dict]) -> list:
             story.append(PageBreak())
             first = False
 
-        story.extend(_site_section(f, site, rows))
+        # P1-2026-07-07: per-site safe_section
+        site_block = safe_section(
+            f"明细页 {site}", lambda s=site, r=rows: _site_section(f, s, r),
+            tracker=tracker,
+        )
+        # 不管成功 fallback 都 extend（fallback 是警告段，非空）
+        story.extend(site_block)
         prev_was_large = is_large
 
     # 0条网站合并到最后一页(接续上一段或另起)
     if sites_no_data:
         story.append(PageBreak())
         for site in sites_no_data:
-            story.extend(_site_section(f, site, []))
+            site_block = safe_section(
+                f"明细页 {site}", lambda s=site: _site_section(f, s, []),
+                tracker=tracker,
+            )
+            story.extend(site_block)
 
     return story
 
@@ -357,7 +397,14 @@ def generate(year: int, month: int) -> str:
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     report_month = f"{year}年{month}月"
 
-    all_records = month_records(first, last)
+    # P1-2026-07-07: 月度查询包 try（schema 变更列缺失等场景不丢整月报告）
+    try:
+        all_records = month_records(first, last)
+    except Exception as e:
+        logger.error(f"[tender_report] 月度查询 {report_month} 失败: {e}", exc_info=True)
+        print(f"❌ {report_month} 月度查询失败: {e}")
+        return ""
+
     if not all_records:
         print(f"[WARN] {report_month} 无盐南/经开数据")
         return ""
@@ -374,8 +421,13 @@ def generate(year: int, month: int) -> str:
     )
 
     story = []
-    story.extend(page1_summary(font, report_month, first, last, today, yesterday, all_records))
-    story.extend(detail_pages(font, all_records))
+    main_tracker = SafeSectionTracker()  # P1-2026-07-07: 跨 page1+detail 的总 tracker
+    story.extend(page1_summary(font, report_month, first, last, today, yesterday, all_records, tracker=main_tracker))
+    # detail_pages 中每个 site section 也包到 safe_section
+    detail_story = detail_pages(font, all_records, tracker=main_tracker)
+    story.extend(detail_story)
+    # P1-2026-07-07: 末尾加 tracker summary
+    story.extend(main_tracker.summary_paragraph("本次招标公告报告"))
 
     doc.build(story)
     unclassified = sum(1 for r in all_records if r["proj_major_cat"] is None)
