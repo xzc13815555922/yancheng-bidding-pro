@@ -1,6 +1,6 @@
 ---
 name: yancheng-bidding-pro
-description: 全域盐城招标数据采集（12站/12739条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报 + PDF采购意向报告（不导出Excel）
+description: 全域盐城招标数据采集（12站/13820条原始→unified.db）；触发词：全域招标 / 盐城招标 / 招标采集Pro；输出 unified.db + PDF月报 + PDF倒计时报告 + 运营商综合月报 + PDF采购意向报告（不导出Excel）
 outputs:
   - sqlite  # data/unified.db（四张表：tender/award/intention/other + project_links + project_chain视图）
   - sqlite  # data/*.db（12个站点独立数据库）
@@ -9,10 +9,10 @@ outputs:
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
   - pdf     # output/盐城通信运营商中标报告_YYYY-MM.pdf（三源合并：ybp+tyc+obm）
   - pdf     # output/盐开采购意向报告_YYYYMM.pdf（盐南+经开采购意向月报）
-version: v2.6
+version: v2.7
 status: 生产可用
-last_run: 2026-06-30
-records: 12739条原始（12站）→ unified.db tender:3802/award:4035/intention:1143/other:3149；project_links:2723条(67%覆盖)
+last_run: 2026-07-08
+records: 13820条原始（12站）→ unified.db tender:4048/award:4423/intention:1205/other:3482；project_links:2875条(65%覆盖)
 
 > **v2.7 变更（2026-07-06）**：① P0 重复入库修复（tyc/yancheng_gov UNIQUE INDEX + make_id 去「采购包N」后缀）② P0 运营商报告金额单位 `*10000` 修复 ③ 飞书推送 cron v2.4→v2.6 升级 ④ 中小微企业专题（tender/intention 加 sme_target 列 + 报表加列） ⑤ P0 批次标题误作项目名修复（_json 嵌套 import + 单项目也用子项 name + extract_sme_target _URL_INDEX） ⑥ P4 enrich_details 高可信预算词优先 ⑦ P5 enrich_details 单位过滤修正（X万元/年不再被误判） ⑧ P6 enrich_details 全面优化（jszbcg 4 种资金来源 + OCR「米源」容错 + _parse_amount safe_float 防护 + tyc.notices UNIQUE INDEX 补齐）。详细见本 SKILL.md 「本轮修复清单（v2.5 → v2.6，2026-07-06）」section。
 > **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
@@ -154,7 +154,7 @@ python3 enrich_yancheng_gov.py
 | `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
 | `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
-## 数据质量现状（2026-06-26 v2.6）
+## 数据质量现状（2026-07-08 v2.7）
 
 ### unified.db 四表
 
@@ -166,7 +166,7 @@ python3 enrich_yancheng_gov.py
 | other | 3149 | — | — | — |
 
 **project_links/project_chain（v2.6 新增）**
-- tender×award 关联率：67%（2723/4035）
+- tender×award 关联率：65%（2875/4423）
 - 平均招采周期：20天；中标折扣率均值：83.7%
 - 含更正公告链路：22%（598条）
 
