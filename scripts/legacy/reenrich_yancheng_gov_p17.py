@@ -22,7 +22,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 
 def main():
@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--confirm", action="store_true", help="真清空 + 写回")
     args = parser.parse_args()
 
-    sys.path.insert(0, str(Path(__file__).parent))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from enrich_details import parse_html_detail
 
     db_path = DATA_DIR / "yancheng_gov.db"

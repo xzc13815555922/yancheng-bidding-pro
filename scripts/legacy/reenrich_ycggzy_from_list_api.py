@@ -31,7 +31,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 # ycggzy 列表 API
 LIST_API = "https://ycggzy.jszwfw.gov.cn/cums/home/notice/noticePage"
@@ -91,8 +91,8 @@ def main():
     args = parser.parse_args()
 
     # 延迟导入 ycggzy 内的解析器 (PaddleOCR 等重依赖不引入)
-    sys.path.insert(0, str(Path(__file__).parent))
-    sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent / "crawlers"))
     from crawlers.ycggzy import _parse_ycggzy_content  # noqa: E402
     from enrich_details import _parse_datetime  # noqa: E402
 

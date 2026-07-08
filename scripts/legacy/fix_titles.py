@@ -10,7 +10,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "crawlers"))
 from base import DATA_DIR
 
 DB_PATH = DATA_DIR / "yancheng_gov.db"

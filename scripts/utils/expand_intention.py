@@ -16,7 +16,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 DB_PATH = DATA_DIR / "yancheng_gov.db"
 
 # 从管道分隔的 markdown 表格行提取子项

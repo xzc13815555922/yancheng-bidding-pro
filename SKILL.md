@@ -15,7 +15,7 @@ last_run: 2026-07-08
 records: 13820条原始（12站）→ unified.db tender:4048/award:4423/intention:1205/other:3482；project_links:2875条(65%覆盖)
 
 > **v2.7 变更（2026-07-06）**：① P0 重复入库修复（tyc/yancheng_gov UNIQUE INDEX + make_id 去「采购包N」后缀）② P0 运营商报告金额单位 `*10000` 修复 ③ 飞书推送 cron v2.4→v2.6 升级 ④ 中小微企业专题（tender/intention 加 sme_target 列 + 报表加列） ⑤ P0 批次标题误作项目名修复（_json 嵌套 import + 单项目也用子项 name + extract_sme_target _URL_INDEX） ⑥ P4 enrich_details 高可信预算词优先 ⑦ P5 enrich_details 单位过滤修正（X万元/年不再被误判） ⑧ P6 enrich_details 全面优化（jszbcg 4 种资金来源 + OCR「米源」容错 + _parse_amount safe_float 防护 + tyc.notices UNIQUE INDEX 补齐）。详细见本 SKILL.md 「本轮修复清单（v2.5 → v2.6，2026-07-06）」section。
-> **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
+> **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`scripts/utils/expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
 ---
 
 # 全域招标信息采集 Pro
@@ -124,14 +124,14 @@ python3 download_jszbcg_pdfs.py
 python3 rename_pages.py
 
 # 清理 yancheng_gov art_20171 脏数据（默认dry-run，--confirm真删）
-python3 cleanup_art_20171_dupes.py [--confirm]
+python3 scripts/legacy/cleanup_art_20171_dupes.py [--confirm]
 ```
 
 ## ycggzy 专用补采（发包单位 API 补全）
 
 ```bash
 # ycggzy 是 SPA，purchaser 来自列表 API，不走 enrich_details
-python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
+python3 scripts/legacy/reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 ```
 
 ## yancheng_gov Playwright 补全（按需）
@@ -151,8 +151,8 @@ python3 enrich_yancheng_gov.py
 | 脚本 | 说明 | 状态 |
 |------|------|------|
 | `dry_run_v2.py` | 分类规则只读调试，验证 RULES 命中情况 | 按需 |
-| `fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
-| `migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
+| `scripts/legacy/fix_titles.py` | 修复 yancheng_gov 141条乱码标题 | 已用完 |
+| `scripts/legacy/migrate_from_old.py` | 从旧 history.db 迁移到 Pro DB | 已用完 |
 
 ## 数据质量现状（2026-07-08 v2.7）
 
@@ -213,7 +213,7 @@ python3 enrich_yancheng_gov.py
 | # | 站点/文件 | 问题 | 根因 | 修复 | 效果 |
 |---|----------|------|------|------|------|
 | 130 | `crawlers/base.py` | 7/7 05:15 cron 实证 ycggzy/dushi/chennan 3 站采集全失败：`UNIQUE constraint failed: notices.detail_url` | v2.6 (7/6) `idx_notices_detail_url` UNIQUE INDEX 给了所有 12 站；但 ycggzy/dushi/chennan 的 notices 会跨日变更（同 detail_url 多 publish_date 是合法业务），`SiteDB(site_key)._init()` 跑 `CREATE UNIQUE INDEX` 直接抛 IntegrityError → ycggzy.py:507 `super().__init__()` 整体失败 | (1) `base.py` 加白名单常量 `UNIQUE_INDEX_SITES = {'jszbcg', 'yancheng_gov', 'tyc'}`  (2) SCHEMA 移除 UNIQUE INDEX 行  (3) `SiteDB._init()` 末尾按白名单动态建 UNIQUE INDEX | ycggzy 实例化成功（7/7 cron 失败原因根治）；jszbcg/yancheng_gov/tyc 仍有 UNIQUE INDEX（双保险去重生效） |
-| 131 | `fix_unique_index_scope.py`（新增 200 行）| 历史 DB 已有 UNIQUE INDEX 的非白名单站（bigdata/dongfang/jingkai/jscn/kaifaqu/sufu/yueda 7 站）需手动清理 | 脚本一次跑：白名单站 KEEP / 非白名单站 DROP UNIQUE INDEX（保留普通索引）；支持 `--dry-run`；幂等；日志 `logs/fix_unique_index_*.log` | 7/7 真跑：KEEP=3 / DROP=7 / NOOP=3 (ycggzy/dushi/chennan 本就没索引) / ERROR=0；再跑一次全 NOOP |
+| 131 | `scripts/legacy/fix_unique_index_scope.py`（新增 200 行）| 历史 DB 已有 UNIQUE INDEX 的非白名单站（bigdata/dongfang/jingkai/jscn/kaifaqu/sufu/yueda 7 站）需手动清理 | 脚本一次跑：白名单站 KEEP / 非白名单站 DROP UNIQUE INDEX（保留普通索引）；支持 `--dry-run`；幂等；日志 `logs/fix_unique_index_*.log` | 7/7 真跑：KEEP=3 / DROP=7 / NOOP=3 (ycggzy/dushi/chennan 本就没索引) / ERROR=0；再跑一次全 NOOP |
 
 **白名单依据**：SKILL.md 第 221 行 v2.6 修复记录已明确"跨日期合法业务（ycggzy/dushi/chennan）不加 UNIQUE INDEX"——本次修复回归设计意图。
 
@@ -542,7 +542,7 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 
 | 站点/场景 | 字段 | 缺口数 | 原因 |
 |---------|------|--------|------|
-| ycggzy | 发包方 | ~189 | SPA API，reenrich_ycggzy.py 698条未匹配 |
+| ycggzy | 发包方 | ~189 | SPA API，scripts/legacy/reenrich_ycggzy.py 698条未匹配 |
 | yancheng_gov | 中标金额 | ~294 | 部分中标公告网页结构无金额字段 |
 | jszbcg award | 中标金额 | ~308 | 候选人公示类PDF无最终成交金额 |
 | yancheng_gov intention | 预算 | 437 | 采购意向公告本身不披露预算 |
@@ -604,7 +604,7 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 | # | 问题 | 修复 |
 |---|------|------|
 | 56 | yancheng_gov COLUMNS[20171] 实为公开招标跳转页，与 20174/… 重复入库 66 条，open_date 全空 | `crawlers/yancheng_gov.py` 注释删除 COLUMNS[20171] |
-| 57 | unified.db 遗留 66 条 art_20171 脏数据 | `cleanup_art_20171_dupes.py` --confirm 真删，自动备份 |
+| 57 | unified.db 遗留 66 条 art_20171 脏数据 | `scripts/legacy/cleanup_art_20171_dupes.py` --confirm 真删，自动备份 |
 | 58 | build_unified.py 未过滤 art_20171 URL（防未来残留） | 加 `_BAD_URL_PAT = re.compile(r'art_20171_')` 过滤 |
 
 ### 新增脚本（2个）
@@ -631,7 +631,7 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 | # | 问题 | 修复位置 |
 |---|------|---------|
 | 37 | yancheng_gov columnid=20171 脏数据源 | `crawlers/yancheng_gov.py` 删除 COLUMNS[20171] |
-| 38 | unified.db 残留 66 条历史脏数据 | `cleanup_art_20171_dupes.py` |
+| 38 | unified.db 残留 66 条历史脏数据 | `scripts/legacy/cleanup_art_20171_dupes.py` |
 
 ## 本轮修复清单（v1.4 → v1.5，2026-06-21）
 

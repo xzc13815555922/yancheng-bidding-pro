@@ -26,7 +26,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 BACKUP_DIR = DATA_DIR / "backup"
 UNIFIED_DB = DATA_DIR / "unified.db"
 YANCHENG_GOV_DB = DATA_DIR / "yancheng_gov.db"

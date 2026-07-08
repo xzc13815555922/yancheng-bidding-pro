@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # 注：migrate 脚本路径在项目根目录
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent.parent
 UNIFIED_DB = ROOT / "data" / "unified.db"
 
 

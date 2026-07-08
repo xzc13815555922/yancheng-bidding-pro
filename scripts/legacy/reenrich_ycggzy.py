@@ -15,7 +15,7 @@ from pathlib import Path
 
 import requests
 
-sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "crawlers"))
 from base import DATA_DIR
 from ycggzy import _parse_ycggzy_content, _map_notice_type, CLASS_CODES, HEADERS, LIST_API
 

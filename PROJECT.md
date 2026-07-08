@@ -129,7 +129,7 @@ FROM project_links pl JOIN tender t ON t.id=pl.tender_id
 - **v2.6 解耦**：per-site 解析器迁入 `crawlers/{jszbcg,sufu}_parser.py`，主文件 1082→829 行
 - **反爬**：间隔 0.5-1.5s / 失败重试 3 次 / detail_fetched=2 跳过
 
-> **v2.7 更新 (2026-07-06)**：`reenrich.py` 补全统一入口（4 步调度）；`reenrich_jszbcg_open_date.py` 真开标时间解析（1683 条，99.9% 合理性）。
+> **v2.7 更新 (2026-07-06)**：`reenrich.py` 补全统一入口（4 步调度）；`scripts/legacy/reenrich_jszbcg_open_date.py` 真开标时间解析（1683 条，99.9% 合理性）。
 
 ---
 
@@ -151,7 +151,7 @@ FROM project_links pl JOIN tender t ON t.id=pl.tender_id
 
 ```
 yancheng-bidding-pro/
-├── PROJECT.md / README.md / cleanup_orphan_dbs.py (P2-1 新增)
+├── PROJECT.md / README.md / scripts/legacy/cleanup_orphan_dbs.py (P2-1 新增)
 ├── data/  12 站 .db + unified.db + pages/ + pdfs/ + backup/
 ├── crawlers/
 │   ├── base.py / html_common.py
@@ -161,7 +161,7 @@ yancheng-bidding-pro/
 │   └── tyc_crawler.py / tyc_login.py
 ├── tests/test_enrich_details.py  ← v2.6 单测
 ├── enrich_details.py (829行, v2.6 解耦)
-├── reenrich.py / enrich_amendment_opendate.py / expand_intention.py
+├── reenrich.py / enrich_amendment_opendate.py / scripts/utils/expand_intention.py
 ├── extract_sme_target.py  ← v2.7 中小微专题新增
 ├── build_unified.py / build_project_links.py
 ├── add_std_district.py / add_std_category.py
@@ -169,6 +169,14 @@ yancheng-bidding-pro/
 ├── report_failed_bids.py
 ├── generate_{tender,intention,countdown_report,countdown_report_pdf,operator_award,operator_combined}_report.py
 ├── rules/category.yaml (48 条, v2.5)
+├── scripts/legacy/   一次性 / 已用完脚本（v2.6-v2.7 沉淀）
+│   ├── reenrich_*.py (4 个站点补采)
+│   ├── fix_titles.py / fix_unique_index_scope.py
+│   ├── cleanup_art_20171_dupes.py / cleanup_orphan_dbs.py
+│   └── migrate_from_old.py
+├── scripts/utils/    长期工具（产品级入口或可复用）
+│   ├── expand_intention.py        批次意向展开
+│   └── migrate_unified_schema.py  unified.db schema 迁移
 └── logs/
 ```
 

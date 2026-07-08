@@ -29,7 +29,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 # ── 真开标时间匹配模式（按优先级） ─────────────────────────────
 # 注意：jszbcg 的 PDF 是图片型 → OCR 出来日期有空格，如 "2026 年 07 月 03 日 15 时 00 分"
