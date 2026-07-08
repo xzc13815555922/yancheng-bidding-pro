@@ -100,8 +100,8 @@ def _ewb_crawl(site_key: str, site_name: str, base_url: str, list_path: str,
                 detail_html = get_html(detail_url)
                 page_path = save_page_md(detail_html, detail_url, site_key, title)
                 enriched = parse_html_detail(detail_html, ntype)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f'[save_record_silent_fail] L103 {e}')
             record = {
                 "id": record_id, "site": site_key,
                 "notice_type": ntype,

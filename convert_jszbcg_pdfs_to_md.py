@@ -6,6 +6,7 @@
 用法：
     python3 convert_jszbcg_pdfs_to_md.py [--limit N]
 """
+import logging
 import argparse
 import re
 import sqlite3
@@ -32,8 +33,8 @@ def _ocr_pdf(pdf_path: Path) -> tuple[str, str]:
         combined = "\n".join(pages_text)
         if len(combined.strip()) > 100:
             return combined, "text"
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f'[convert_pdf_md] L36 {e}')
 
     # 图片型 PDF → PaddleOCR
     try:

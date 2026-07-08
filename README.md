@@ -442,3 +442,45 @@ python3 reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 - 修复后: intention 总数 1187, 1172 真项目名 (98.7%), 15 用批次名 (1.3%, 全部是「建湖县排水防涝工程（第三批）」这类 真·批次项目名)
 - intention SME 标签: 0 专门面向 → 376 专门面向 (47.5% 命中率)
 - 新 PDF 清单二 74 条全部真项目名, 0 批次名
+
+## 测试（v2.7+，2026-07-07 起）
+
+为防 P0-1 / P0-3 / P0-4 / P1-1 / P1-2 / P1-3 回归，补 6 个单测文件覆盖关键修正点。
+
+### 测试文件清单
+
+| # | 文件 | 防护区 |
+|---|------|--------|
+| T-1 | `tests/test_black_holes.py` | AST 扫描防 `except: pass` 黑洞回归（**P0-3 后底线**） |
+| T-2 | `tests/test_make_id.py` | `make_id` 3 个采购包后缀剥除 bug（**P1-1 后防 BUG-01/02/03**） |
+| T-3 | `tests/test_dedup_awards.py` | `_dedup_awards` / `_norm_award_name` 多重嵌套剥离 + 按月分组（**P1-2 后防 BUG-04/05/07**） |
+| T-4 | `tests/test_is_valid_purchaser.py` | `_is_valid_purchaser` 3-8 字 + 机构后缀白名单（**P1-3 后防 BUG-08**） |
+| T-5 | `tests/test_journal_mode_wal.py` | 12 个 .db 强制 WAL mode + busy_timeout ≥ 5000（**P0-4 后防并发 BUSY**） |
+| T-6 | `tests/test_unique_index_scope.py` | UNIQUE INDEX 仅白名单站（jszbcg/yancheng_gov/tyc）有，其它站防误加（**P0-1 后防漏采**） |
+| 历史 | `tests/test_enrich_details.py` | 关键词补充兜底（v2.6 已有） |
+
+### 使用方法
+
+```bash
+# 跑全部
+python3 -m pytest tests/ -v
+
+# 跳漏点打
+python3 -m pytest tests/ -ra
+
+# 验证黑洞扫描生效（反向保护证明）
+echo 'def f():
+    try: x = 1
+    except Exception: pass' > crawlers/_tmp_hole.py
+python3 -m pytest tests/test_black_holes.py -v   # 应该 fail
+rm crawlers/_tmp_hole.py
+python3 -m pytest tests/test_black_holes.py -v   # 恢复 pass
+```
+
+### 当前状态
+
+- **2026-07-07 v2.7-P0P1P2P3 后首跑**：116 passed, 2 skipped
+- **2 个 skip 为 KNOWN-GAP**：后续修复后移除 skip 即可解锁
+- **T-1 允许历史 56 处黑洞**（列入 allowlist），新引入任何黑洞会立刻 fail
+
+详见 `pytest.ini` 与各 test 文件顶部 docstring。

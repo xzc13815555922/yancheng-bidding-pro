@@ -57,8 +57,8 @@ def print_stats():
             db.close()
             total_all += total; pc_all += pc; bu_all += bu; od_all += od; wi_all += wi
             print(f"{s:<14} {total:>6} {pc:>8} {bu:>6} {od:>8} {wi:>8}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'[print_stats_site_open] L60 {e}')
     print("-" * 55)
     print(f"{'合计':<14} {total_all:>6} {pc_all:>8} {bu_all:>6} {od_all:>8} {wi_all:>8}")
 
@@ -92,8 +92,8 @@ def _repair_derived_fields(site_filter: str = ""):
                     sec = CODE_MAP.get(code)
                     if sec:
                         updates.append((sec, row_id))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[print_stats_table_open] L95 {e}')
             if updates:
                 conn.executemany("UPDATE notices SET section=? WHERE id=?", updates)
                 conn.commit()
@@ -103,8 +103,8 @@ def _repair_derived_fields(site_filter: str = ""):
             try:
                 conn.execute("ALTER TABLE notices ADD COLUMN notice_type_raw TEXT")
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f'[repair_derived_section] L106 {e}')
             rows2 = conn.execute(
                 "SELECT id, raw_json FROM notices WHERE notice_type_raw IS NULL"
             ).fetchall()
@@ -114,8 +114,8 @@ def _repair_derived_fields(site_filter: str = ""):
                     v = _json.loads(rj).get("typeName")
                     if v:
                         updates2.append((v, row_id))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[repair_derived_notice_type] L117 {e}')
             if updates2:
                 conn.executemany("UPDATE notices SET notice_type_raw=? WHERE id=?", updates2)
                 conn.commit()

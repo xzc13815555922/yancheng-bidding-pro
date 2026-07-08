@@ -230,8 +230,8 @@ class YanchengGovCrawlerPro(BaseCrawler):
                     if len(parts) == 3 and parts[0] in ('盐城市财政局',):
                         t = parts[2]
                     return t
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'[save_record_silent_fail] L233 {e}')
         return ""
 
     @staticmethod

@@ -107,8 +107,8 @@ class YuedaCrawlerPro(BaseCrawler):
                     detail_html = get_html(detail_url)
                     page_path = save_page_md(detail_html, detail_url, self.SITE_KEY, title)
                     enriched = parse_html_detail(detail_html, nt)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[save_record_silent_fail] L110 {e}')
                 record = {
                     "id": record_id, "site": self.SITE_KEY,
                     "notice_type": nt,

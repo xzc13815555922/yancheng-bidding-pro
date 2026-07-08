@@ -273,8 +273,8 @@ def _extract_intention(soup: BeautifulSoup) -> Dict:
                         if 0 < v < 1e7:  # assume 万元, max 1000亿
                             total += v * 1e4  # convert 万 to 元
                             count += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f'[enrich_yancheng_gov] L276 {e}')
 
         if count > 0:
             result['budget'] = total

@@ -1,5 +1,7 @@
 # 数据文件（本地采集，不入库）
 data/*.db
+# 显式忽略已知的孤儿 DB 占位文件(2026-07-07 P2-1)
+data/ybp.db
 data/
 data/pdfs/
 data/pages/

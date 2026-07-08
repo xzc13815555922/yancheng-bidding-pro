@@ -26,10 +26,13 @@ tyc_login.py — 天眼查扫码登录工具
 """
 
 import json
+import logging
 import os
 import sys
 import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COOKIE_PATH = os.path.join(SKILL_DIR, "data", "cookies.json")
@@ -73,8 +76,8 @@ def detect_login_success(page) -> bool:
         btn = page.locator("a:has-text('登录/注册'), button:has-text('登录')").first
         if btn.count() == 0:
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'[tyc_login:login_check_locator] L79 {e}')
 
     return False
 
@@ -222,8 +225,8 @@ def _wait_for_user(browser, timeout: int, message: str):
     finally:
         try:
             browser.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'[tyc_login:browser_close_finally] L228 {e}')
 
 
 def verify_cookie() -> bool:

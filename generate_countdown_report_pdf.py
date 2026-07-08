@@ -6,9 +6,14 @@ generate_countdown_report_pdf.py — 盐开开标倒计时报告（PDF版）
 """
 
 import os, sys, sqlite3
+import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
+
+from pdf_safe_section import safe_section, SafeSectionTracker
+
+logger = logging.getLogger(__name__)
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -222,6 +227,7 @@ def build(run_date: Optional[date] = None):
 
     # ── 构建 story ──────────────────────────────────────────
     story = []
+    tracker = SafeSectionTracker()  # P1-2026-07-07
 
     # 总标题
     story.append(Paragraph("盐开 · 开标倒计时报告（未分类项目）", s_title))
@@ -248,7 +254,13 @@ def build(run_date: Optional[date] = None):
             f"⬛ 今日开标 {today_cnt} 条　▶ 橙底=今日开标，橙字=3天内开标",
             s_note
         ))
-        story.append(_build_table(f, future_rows, today, future=True))
+        # P1-2026-07-07: 表体包 safe_section，表头/标题不被中断
+        future_block = safe_section(
+            "清单一未来开标表体",
+            lambda: _build_table(f, future_rows, today, future=True),
+            tracker=tracker,
+        )
+        story.extend(future_block)
     else:
         story.append(Paragraph("　　本期暂无即将开标的未分类项目。", s_note))
 
@@ -265,7 +277,13 @@ def build(run_date: Optional[date] = None):
             f"⬛ 按开标时间倒序排列，最近开标在前",
             s_note
         ))
-        story.append(_build_table(f, past_rows, today, future=False))
+        # P1-2026-07-07
+        past_block = safe_section(
+            "清单二已开标表体",
+            lambda: _build_table(f, past_rows, today, future=False),
+            tracker=tracker,
+        )
+        story.extend(past_block)
     else:
         story.append(Paragraph("　　本月暂无已开标的未分类项目。", s_note))
 
@@ -291,7 +309,9 @@ def build(run_date: Optional[date] = None):
         topMargin=1.0*cm, bottomMargin=1.2*cm,
     )
     doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
-    print(f"✓ {out}  (未来{len(future_rows)}条 / 已开标{len(past_rows)}条)")
+    # P1-2026-07-07: 末尾统计行已在 doc.build 前 append
+    print(f"✓ {out}  (未来{len(future_rows)}条 / 已开标{len(past_rows)}条)  "
+          f"[{tracker.ok_count}段成功 / {tracker.fail_count}段异常]")
     return out
 
 

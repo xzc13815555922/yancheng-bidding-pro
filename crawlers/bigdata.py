@@ -88,8 +88,8 @@ class BigdataCrawlerPro(BaseCrawler):
                     if time_el:
                         pub_date = extract_date(time_el.get_text())
                     enriched = parse_html_detail(detail_html, ntype)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[save_record_silent_fail] L91 {e}')
                 if not pub_date:
                     continue
                 if pub_date < start_date or pub_date > end_date:

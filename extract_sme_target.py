@@ -15,6 +15,7 @@ extract_sme_target.py — 提取项目「是否专门面向中小微企业」标
   2. 排除: 「十、附件」段 (政府通用模板, 非项目实际政策)
   3. 上下文窗口: 关键词前 200 字符
 """
+import logging
 import os
 import re
 import sqlite3
@@ -111,8 +112,8 @@ def _build_url_index():
             for url, pp in rows:
                 if pp and Path(pp).exists():
                     _URL_INDEX[url] = Path(pp)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f'[extract_sme_label] L115 {e}')
     return _URL_INDEX
 
 

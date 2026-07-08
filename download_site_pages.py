@@ -79,8 +79,8 @@ def _add_page_path_col(conn: sqlite3.Connection):
     try:
         conn.execute("ALTER TABLE notices ADD COLUMN page_path TEXT")
         conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f'[download_page_md] L82 {e}')
 
 
 def download_site(site: str, sess: requests.Session):

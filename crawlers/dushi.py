@@ -112,8 +112,8 @@ class DushiCrawlerPro(BaseCrawler):
                     detail_html = get_html(detail_url)
                     page_path = save_page_md(detail_html, detail_url, self.SITE_KEY, title)
                     enriched = parse_html_detail(detail_html, ntype)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'[save_record_silent_fail] L115 {e}')
                 # open_date from list text (faster than detail page)
                 if not enriched.get("open_date"):
                     om = re.search(

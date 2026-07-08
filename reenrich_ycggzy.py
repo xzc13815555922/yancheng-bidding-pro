@@ -45,8 +45,8 @@ def reenrich(start_date: str = "2026-06-01", end_date: str = "2026-06-19"):
             api_id = rj.get("id")
             if api_id:
                 id_by_api_id[str(api_id)] = row["id"]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f'[reenrich_ycggzy] L48 {e}')
 
     logger.info(f"DB记录: {len(rows)}条  url索引: {len(id_by_url)}  api_id索引: {len(id_by_api_id)}")
 

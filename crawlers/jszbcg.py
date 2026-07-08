@@ -194,8 +194,8 @@ class JSZbcgCrawlerPro(BaseCrawler):
             doc = fitz.open(pdf_path)
             text = "\n".join(page.get_text("text") for page in doc)
             doc.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'[pdf_text_fitz_warning] L197 {e}')
 
         if len(text.strip()) < 100:
             # 图片型 PDF → PaddleOCR（singleton，避免每次重新加载5个模型）

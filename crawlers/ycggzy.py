@@ -134,12 +134,12 @@ def _extract_bidplan_budget(html: str) -> Optional[float]:
                             if 1 <= v <= 1e7:  # 合理万元范围
                                 total += v
                                 count += 1
-                        except ValueError:
-                            pass
+                        except ValueError as e:
+                            logger.warning(f'[bidplan_budget_safe_float] L137 {e}')
             if count > 0:
                 return total * 1e4  # 万元→元
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f'[bidplan_budget_outer] L141 {e}')
     return None
 
 
@@ -289,8 +289,8 @@ def _parse_ycggzy_content(html: str, notice_type: str) -> dict:
                         amt = float(g.replace(',', ''))
                         if 100 <= amt <= 5e10:
                             result['winning_amount'] = amt
-                    except (ValueError, IndexError):
-                        pass
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f'[extract_bidplan_data_col] L292 {e}')
 
         if notice_type in ('tender', 'other', 'intention', 'price_cap'):
             # 最高限价/招标控制价
@@ -448,8 +448,8 @@ def _parse_ycggzy_content(html: str, notice_type: str) -> dict:
                         break
                 if 'winner' in result:
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'[classify_subtype_parse] L451 {e}')
 
     # 其余字段复用通用解析器（预算/开标时间/中标信息）
     generic = parse_html_detail(html, notice_type)
@@ -585,8 +585,8 @@ class YcggzyCrawlerPro(BaseCrawler):
                 if content_html:
                     try:
                         enriched = _parse_ycggzy_content(content_html, notice_type)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f'[save_or_skip_item] L588 {e}')
 
                 record = {
                     "id":           record_id,

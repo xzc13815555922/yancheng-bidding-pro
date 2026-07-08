@@ -152,8 +152,8 @@ def _parse_ocr_text(text: str, notice_type: str) -> dict:
                     if 100 <= v <= 5e10:
                         result["winning_amount"] = v
                         break
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    logging.warning(f'[ocr_parse_int] L155 {e}')
 
     # ── 预算 / 控制价（tender 和 award 均尝试）──
     budget_patterns = [
@@ -183,8 +183,8 @@ def _parse_ocr_text(text: str, notice_type: str) -> dict:
                     result["budget_unit"] = "元"
                     result["budget_text"] = m.group(0)[:40]
                     break
-            except ValueError:
-                pass
+            except ValueError as e:
+                logging.warning(f'[ocr_parse_amount] L186 {e}')
 
     return result
 
@@ -283,8 +283,8 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
                     _pf.write_bytes(pdf_bytes)
                     conn.execute("UPDATE notices SET pdf_path=? WHERE id=?", (str(_pf), rid))
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.warning(f'[ocr_save_md] L286 {e}')
             except Exception as e:
                 logger.info(f"  → PDF下载失败: {e}")
                 fail += 1
@@ -322,8 +322,8 @@ def enrich_jszbcg_ocr(limit: int = 0, force: bool = False):
             for key in ("budget", "budget_unit", "budget_text", "winner", "winning_amount", "open_date", "purchaser"):
                 if key not in fields and generic.get(key):
                     fields[key] = generic[key]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f'[ocr_outer_retry] L325 {e}')
         if ntype == "award" and "winner" not in fields:
             fields["winner"] = ""
         if not fields:

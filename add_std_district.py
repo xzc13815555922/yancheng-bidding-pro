@@ -11,6 +11,7 @@ add_std_district.py — 给12个DB添加 std_district 列并批量分类
   6. NULL
 """
 
+import logging
 import json
 import sqlite3
 from pathlib import Path
@@ -183,8 +184,8 @@ for site in SITES:
         raw = {}
         try:
             raw = json.loads(row["raw_json"] or "{}")
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f'[std_district_lookup] L187 {e}')
 
         # ── sufu 特殊处理 ──────────────────────────────────────────────
         # district_code 为空时，读 raw_json.region（API 已明确区分）

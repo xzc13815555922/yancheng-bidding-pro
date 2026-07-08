@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """导出全域招标数据到 Excel（v6）"""
+import logging
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -198,8 +199,8 @@ def _style_workbook(path: Path):
                     # 中文算2，英文算1
                     length = sum(2 if ord(c) > 127 else 1 for c in v)
                     max_len = max(max_len, length)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logging.warning(f'[export_excel_sheet] L202 {e}')
             ws.column_dimensions[col_letter].width = min(max_len + 2, 60)
 
         ws.freeze_panes = "A2"
