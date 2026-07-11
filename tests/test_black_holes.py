@@ -23,7 +23,10 @@ import pathlib
 
 import pytest
 
-PROJ = pathlib.Path("/Users/yc/.openclaw/workspace/yancheng-bidding-pro")
+# P0-1 (2026-07-11): 不再硬编码绝对路径,改从本测试文件位置推导项目根
+# 别人 git clone 到任意位置都能扫到真代码
+PROJ = pathlib.Path(__file__).resolve().parents[1]
+
 SKIP_KEYWORDS = ("test_", "backup", "__pycache__", ".git", "/output/", "/audit/")
 
 # 允许的"吞掉异常"函数（仅作 logging 用途的，不算黑洞）

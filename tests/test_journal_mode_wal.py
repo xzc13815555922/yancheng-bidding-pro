@@ -14,7 +14,8 @@ import sqlite3
 
 import pytest
 
-DATA_DIR = pathlib.Path("/Users/yc/.openclaw/workspace/yancheng-bidding-pro/data")
+# P0-1 (2026-07-11): 不再硬编码绝对路径,改从本测试文件位置推导
+DATA_DIR = pathlib.Path(__file__).resolve().parents[1] / "data"
 SITES = [
     "jszbcg", "yancheng_gov", "ycggzy", "sufu", "yueda", "dushi",
     "jscn", "chennan", "dongfang", "bigdata", "jingkai", "kaifaqu",
