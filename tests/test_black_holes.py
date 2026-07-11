@@ -159,14 +159,20 @@ ALLOWED_DROPS = {
 
 
 def _filter_allowed(holes):
-    """分离 (历史允许) 与 (新增黑洞)"""
+    """分离 (历史允许) 与 (新增黑洞)
+
+    P0-2 (2026-07-11) 修复:
+      之前按 line 单独判重 `seen.add(line)`, 跨文件同 line 的黑洞会被
+      静默去重 → 漏报。
+      改为按 (name, line) 复合键判重。
+    """
     existing, new = [], []
     seen = set()
     for name, line, full in holes:
-        if line in seen:  # 防重复扫描导致重复报错
-            continue
-        seen.add(line)
         key = (name, line)
+        if key in seen:  # 防重复扫描导致重复报错 (现在按复合键)
+            continue
+        seen.add(key)
         if key in ALLOWED_DROPS:
             existing.append(key)
         else:
@@ -209,6 +215,33 @@ def test_allowlist_matches_current_count():
     assert not stale, (
         f"allowlist 残留 {len(stale)} 个旧条目（文件已修改），请清理：\n"
         + "\n".join(f"  ({n!r}, {l})" for n, l in sorted(stale))
+    )
+
+
+def test_filter_allowed_dedup_by_composite_key():
+    """P0-2 回归: _filter_allowed 必须按 (name, line) 复合键去重,
+    跨文件同 line 黑洞不得静默漏报。
+    """
+    # 场景: 同一个 line=42 在 a.py 和 b.py 都出现黑洞
+    # - a.py:42 在 ALLOWED_DROPS 中 → 视为历史允许
+    # - b.py:42 不在 ALLOWED_DROPS → 应被报为新增黑洞
+    # 如果用 line-only 去重, b.py:42 会被 seen 拦截掉 → 漏报
+    holes = [
+        ("a.py", 42, "/fake/a.py"),
+        ("b.py", 42, "/fake/b.py"),
+    ]
+    # 把 a.py:42 临时加进 ALLOWED_DROPS 仅本次测试
+    saved = ALLOWED_DROPS.copy()
+    ALLOWED_DROPS.add(("a.py", 42))
+    try:
+        existing, new = _filter_allowed(holes)
+    finally:
+        ALLOWED_DROPS.clear()
+        ALLOWED_DROPS.update(saved)
+
+    assert ("a.py", 42) in existing, f"a.py:42 应为历史允许, got existing={existing}"
+    assert ("b.py", 42) in [n[:2] for n in new], (
+        f"b.py:42 必须被报为新增黑洞(不得被同 line 去重), got new={new}"
     )
 
 
