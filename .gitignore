@@ -29,3 +29,6 @@ output/*.pdf
 output/
 output/*.docx
 tmp_*.py
+
+# 本地审计报告（不入库）
+audit/
