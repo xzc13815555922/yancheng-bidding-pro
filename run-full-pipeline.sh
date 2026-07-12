@@ -61,6 +61,18 @@ $PYTHON download_site_pages.py || {
 }
 
 # ============================================
+# 第2.6步：批次意向展开 (2026-07-12 补, CEO 拍板方案 A)
+# 把 yancheng_gov 详情页 .md 的"批次公告表格"解析为 expected_list JSON
+# 写入 yancheng_gov.db.notices.expected_list
+# build_unified.py 在 Step 6 用 expected_list[0].name 替换批次标题
+# 缺这一步 → 7/6 起所有新批次 PDF 都显示"xx批.政府采购"批次名
+# ============================================
+log "[Step 2.6/10] expand_intention.py (批次意向展开 → expected_list JSON)"
+$PYTHON scripts/utils/expand_intention.py || {
+    log "⚠️  expand_intention 失败，继续后续步骤"
+}
+
+# ============================================
 # 第3步：详情页富化补全
 # ============================================
 log "[Step 3/10] enrich_details.py"

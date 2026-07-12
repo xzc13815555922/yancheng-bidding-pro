@@ -15,6 +15,7 @@ last_run: 2026-07-08
 records: 13820条原始（12站）→ unified.db tender:4048/award:4423/intention:1205/other:3482；project_links:2875条(65%覆盖)
 
 > **v2.7 变更（2026-07-06）**：① P0 重复入库修复（tyc/yancheng_gov UNIQUE INDEX + make_id 去「采购包N」后缀）② P0 运营商报告金额单位 `*10000` 修复 ③ 飞书推送 cron v2.4→v2.6 升级 ④ 中小微企业专题（tender/intention 加 sme_target 列 + 报表加列） ⑤ P0 批次标题误作项目名修复（_json 嵌套 import + 单项目也用子项 name + extract_sme_target _URL_INDEX） ⑥ P4 enrich_details 高可信预算词优先 ⑦ P5 enrich_details 单位过滤修正（X万元/年不再被误判） ⑧ P6 enrich_details 全面优化（jszbcg 4 种资金来源 + OCR「米源」容错 + _parse_amount safe_float 防护 + tyc.notices UNIQUE INDEX 补齐）。详细见本 SKILL.md 「本轮修复清单（v2.5 → v2.6，2026-07-06）」section。
+> **v2.7.1 P0 修复（2026-07-12）**：run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修 7/6 起所有新批次 announcement 走批次名 fallback 的 P0 bug），MEMORY.md 加规则 9（scripts/utils/ dead code 警告）。详见本 SKILL.md 「本轮修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）」section。
 > **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`scripts/utils/expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
 ---
 
@@ -315,6 +316,32 @@ tests = [
 | 1 | `crawlers/html_common.py` | "异常结果公告"/"合同变更公告"被误归 award | 关键词表缺"异常结果""合同变更"，命中 award 通配的"合同"/"结果公告" | other 第一段加 `异常结果` + `合同变更`，提升至 award 兜底前 | 8/8 单测全过（含原有 7 条 + "异常结果公告" + "合同变更公告"） |
 
 **日志**：详见 git commit `876dcdc`。
+
+---
+
+## 本轮修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）
+
+### P0-1: run-full-pipeline.sh 补 expand_intention.py（修批次名 fallback P0 bug）
+
+| # | 站点/文件 | 问题 | 根因 | 修复 | 效果 |
+|---|----------|------|------|------|------|
+| 144 | `run-full-pipeline.sh` | 7/6~7/10 入库 34 条 yancheng_gov 采购意向的 project_name 全是批次名（如 "盐城经开区安监环保局2026年7月(第1批)政府采购意向公告"），未替换为详情页真项目名 | v2.7 eaf09b3 (7/6) 修复 build_unified.py 单项目展开逻辑（L186-200），但**前提是 expected_list 有 JSON 数据**；而唯一负责把 .md 表格解析为 expected_list 的 `scripts/utils/expand_intention.py` 未被接进 pipeline，导致 7/6 后新批次都走 fallback 到批次名 | run-full-pipeline.sh Step 2.5 之后插入 Step 2.6（expand_intention.py）；脚本 + bash -n 语法验证 | 当日 cron 跑后 4/4 推送成功，采购意向 PDF 清单 1 4 条全真项目名（开发区“一区一策”专家及技术支撑服务项目 / 2026年华师培训中心物业服务项目 / 盐城经开区城市公益性公墓项目 / 盐城经开区“人工智能+政务服务”）；后续 cron 永远不会再出现批次名 bug |
+| 145 | MEMORY.md | 缺"新加脚本必须接进 pipeline"规则 | scripts/utils/ 下脚本不被 run-full-pipeline.sh 调用 = 死代码 | MEMORY.md 加规则 9（expand_intention.py Step 2.6 + dead code 警告） | 6165 字节 < 8KB 安全 |
+
+**验证命令**：
+```bash
+cd ~/.openclaw/workspace/yancheng-bidding-pro
+python3 scripts/utils/expand_intention.py     # 609 条 → 608 写入
+python3 build_unified.py                       # 1187 → 1240 (+53 子项)
+python3 generate_intention_report.py           # 清单 1: 4 条全真项目名
+```
+
+**铁证三连**（参见 memory/2026-07-12.md）：
+- yancheng_gov.db.notices 这 3 条 expected_list 全 None
+- run-full-pipeline.sh 11 步里无 expand_intention（7/12 5:09 cron 日志）
+- 时间线对得上：7/1~7/3 手工跑过 expand_intention 全部有 elist；7/6 后无人调全 NULL
+
+**日志**：详见 memory/2026-07-12.md 与 git commit（待 push）。
 
 ---
 

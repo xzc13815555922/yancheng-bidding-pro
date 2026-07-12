@@ -2,9 +2,11 @@
 
 盐城市 12 个招标网站的数据采集、富化、分类和报告生成系统。
 
-**当前版本**：v2.7 | **数据量**：13820条原始 → unified.db 四表合计 13158 | **最后更新**：2026-07-08
+**当前版本**：v2.7.1 | **数据量**：13820条原始 → unified.db 四表合计 13158 | **最后更新**：2026-07-12
 
 > **v2.6 变更说明（2026-06-26）**：① unified.db 新增第四张表 `other`（流标/终止/更正/合同，3031条）及 `project_links` 关联表（tender×award，2652条68%覆盖），新增 `project_chain` 视图 ② `enrich_details.py` 解耦（1082→829行，per-site 解析器迁到 `crawlers/jszbcg_parser.py` / `crawlers/sufu_parser.py`，测试迁到 `tests/`）③ `enrich_amendment_opendate.py` 新增 jszbcg `【更正公告】` 前缀剥离 ④ 新增 `reenrich.py`（补全统一入口）、`report_failed_bids.py`（流标报告）、`scripts/utils/expand_intention.py`（批次意向展开）。
+
+> **v2.7.1 P0 修复(2026-07-12)**：run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修 7/6 起所有新批次 announcement 走批次名 fallback 的 P0 bug，CEO 拍板方案 A）。详见下文「修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）」section。
 
 ## 覆盖站点（12个）
 
@@ -458,6 +460,22 @@ python3 scripts/legacy/reenrich_ycggzy.py --start 2026-05-01 --end 2026-06-22
 - 修复后: intention 总数 1187, 1172 真项目名 (98.7%), 15 用批次名 (1.3%, 全部是「建湖县排水防涝工程（第三批）」这类 真·批次项目名)
 - intention SME 标签: 0 专门面向 → 376 专门面向 (47.5% 命中率)
 - 新 PDF 清单二 74 条全部真项目名, 0 批次名
+
+---
+
+## 修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）
+
+### P0: run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修批次名 fallback P0 bug）
+
+| # | 文件 | 问题 | 根因 | 修复 | 验证 |
+|---|------|------|------|------|------|
+| 144 | `run-full-pipeline.sh` | 7/6~7/10 入库 34 条 yancheng_gov 采购意向的 project_name 全是批次名（如 "盐城经开区安监环保局2026年7月(第1批)政府采购意向公告"），未替换为详情页真项目名 | v2.7 eaf09b3 (7/6) 修复 build_unified.py 单项目展开逻辑（L186-200），但**前提是 expected_list 有 JSON 数据**；唯一负责把 .md 表格解析为 expected_list 的 `scripts/utils/expand_intention.py` 未被接进 pipeline，导致 7/6 后新批次都走 fallback 到批次名 | run-full-pipeline.sh Step 2.5 之后插入 Step 2.6（expand_intention.py）；bash -n 语法验证 OK | 手工跑：expand_intention.py 608/609 写入；build_unified 1187→1240；4 份 PDF 重生成。清单 1 4 条全真项目名：开发区"一区一策"专家及技术支撑服务项目 / 2026年华师培训中心物业服务项目 / 盐城经开区城市公益性公墓项目 / 盐城经开区"人工智能+政务服务"。4/4 推送飞书群 om_x100b6a02e08… / om_x100b6a02e0399… / om_x100b6a02e039c4… / om_x100b6a02e03994… |
+| 145 | `MEMORY.md`（执行员小标） | 缺"新加脚本必须接进 pipeline"规则 | scripts/utils/ 下脚本不被 run-full-pipeline.sh 调用 = 死代码 | MEMORY.md 加规则 9（expand_intention.py Step 2.6 + dead code 警告） | 6165 字节 < 8KB 安全 |
+
+**铁证三连**（详见 `memory/2026-07-12.md`）：
+- yancheng_gov.db.notices 这 3 条 expected_list 全 None（detail_fetched=1、page_path .md 存在）
+- run-full-pipeline.sh 11 步里无 expand_intention（7/12 5:09 cron 日志确认）
+- 时间线：7/1~7/3 手工跑过 expand_intention 全部有 elist；7/6 后无人调全 NULL
 
 ## 测试（v2.7+，2026-07-07 起）
 

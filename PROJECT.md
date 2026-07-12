@@ -181,6 +181,7 @@ yancheng-bidding-pro/
 ```
 
 > **v2.7 更新 (2026-07-06)**：v2.6-v2.7 共新增 6 个脚本（reenrich/extract_sme_target/build_project_links/report_failed_bids/expand_intention/enrich_amendment_opendate）+ tests/ 目录。
+> **v2.7.1 P0 修复 (2026-07-12)**：run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修 7/6 起所有新批次 announcement 走批次名 fallback 的 P0 bug，CEO 拍板方案 A）；MEMORY.md 加规则 9（scripts/utils/ 死代码警告）。
 
 ---
 
@@ -197,4 +198,4 @@ yancheng-bidding-pro/
 
 ---
 
-*最后更新：2026-07-07 P3-2 v0.2 → v2.7 同步完成*
+*最后更新：2026-07-12 v2.7.1 P0 expand_intention.py 接进 pipeline（CEO 拍板方案 A）*
