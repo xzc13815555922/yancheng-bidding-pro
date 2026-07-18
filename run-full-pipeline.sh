@@ -124,12 +124,56 @@ $PYTHON extract_sme_target.py || {
 }
 
 # ============================================
-# 第7步：数据质量验证
+# 第7步：数据质量验证（P0 修复 2026-07-18 小标审计）
+# ──────────────────────────────────
+# 原行为：FAIL 时仅 warning + 继续（导致 8 项基线 FAIL 不被暴露）
+# 新行为：FAIL 时记 CRITICAL + 飞书告警 CEO + exit 1（让 8 项回归可见）
+# 原因：审计证据 — ypb/verify_quality.py 跑出 8 项 FAIL 但 pipeline 不 halt
 # ============================================
 log "[Step 7/10] verify_quality.py"
-$PYTHON verify_quality.py || {
-    log "⚠️  verify_quality 返回非0，继续"
-}
+set +e
+$PYTHON verify_quality.py
+VERIFY_RC=$?
+set -e
+if [ "$VERIFY_RC" -ne 0 ]; then
+    # 抽取 FAIL 摘要（先存变量，避免在 --message 中命令替换碰括号）
+    FAIL_SUMMARY="$(grep -E 'FAIL|❌' /tmp/openclaw/ybp-pipeline-*.log 2>/dev/null | tail -15 || true)"
+    [ -z "$FAIL_SUMMARY" ] && FAIL_SUMMARY="（无 FAIL 行）"
+    # 写 CRITICAL 文件
+    TS="$(date +%Y%m%d_%H%M%S)"
+    CRIT_QUALITY="/tmp/openclaw/CRITICAL_verify_quality_${TS}.md"
+    {
+        echo "# CRITICAL: ybp 数据质量基线不达标"
+        echo
+        echo "- 时间: $(date -Iseconds)"
+        echo "- 步骤: run-full-pipeline.sh Step 7 (verify_quality.py)"
+        echo "- 退出码: $VERIFY_RC"
+        echo "- 详情: 见当日 ybp-pipeline 日志"
+        echo "- 影响: 今日采集数据 quality 不达标，需排查后再触发"
+        echo
+        echo "## 排查路径"
+        echo "1. grep FAIL /tmp/openclaw/ybp-pipeline-*.log"
+        echo "2. cd ~/.openclaw/workspace/yancheng-bidding-pro && python3 verify_quality.py"
+        echo "3. 对比 config.py SITE_BASELINES 与现场不符项"
+    } > "$CRIT_QUALITY"
+    log "📝 CRITICAL(verify_quality) 已写: $CRIT_QUALITY"
+    log "📋 FAIL 摘要:"
+    echo "$FAIL_SUMMARY" | while read -r line; do log "    $line"; done
+    # 飞书告警（消息文本先放到变量，避免引号嵌套崩 bash）
+    ALERT_MSG="🚨 CRITICAL: ybp 数据质量基线不达标（verify_quality 退出码 ${VERIFY_RC}）
+ypb 全流程已暂停，避免把失格数据传给下游报表。
+详情：CRIT_QUALITY=${CRIT_QUALITY}
+当日失败摘要：
+${FAIL_SUMMARY}
+行动建议：检查基线失败站点 → 重跑采集 → 重跑 verify_quality。"
+    openclaw message send \
+        --channel feishu \
+        --account executor \
+        --target "open_id:ou_09c0f6a80ee31cd768628371292a145b" \
+        --message "$ALERT_MSG" >> "$LOG_FILE" 2>&1 || log "⚠️ 质量告警推送失败（不影响 halt）"
+    log "❌ 数据质量不达标，pipeline 退出码 $VERIFY_RC（暂停后续步骤）"
+    exit "$VERIFY_RC"
+fi
 
 # ============================================
 # 第8步：生成报告① — 盐开招标公告月报 PDF

@@ -715,12 +715,19 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 
 ### 修复后 cron 任务清单（当前状态）
 
-| cron 时间 | 任务 | 调用的脚本 | 超时 |
-|---------|------|-----------|------|
-| 05:00 全流程 | `yancheng-bidding-pro daily 5:00 full pipeline` | `bash run-full-pipeline.sh` | 3600s |
-| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.6)` | openclaw message send ×4（含预检探测 + 失败重试） | 1800s |
+| cron 时间 | 任务 | 调用的脚本 | 超时 | 调度器 |
+|---------|------|-----------|------|--------|
+| 05:00 全流程 | `yancheng-bidding-pro daily 5:00 full pipeline` | `bash run-full-pipeline.sh` （由 run-bidding.sh 接力） | 3600s | **launchd plist `com.openclaw.bidding.6.17`**（不是 crontab！） |
+| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.6)` | openclaw message send ×4（push-pdfs.sh v3.0，含预检探测 + 失败重试） | 1800s | openclaw cron f605317e |
 
-**预期耗时**：05:00 cron 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 1-2 分钟（channel-info 预检 + 4次 send，失败 sleep 5s 重试 1 次，v2.6 修复后几乎不需重试）。
+> **⚠️ 重要说明（2026-07-18 小标审计 P1-5 修复）**：
+> ypb **不在**用户 crontab 中（`crontab -l` 无 bid 行），实际由 **macOS launchd** 调度：
+> `~/Library/LaunchAgents/com.openclaw.bidding.6.17.plist` StartCalendarInterval 仅 Hour=5 / Minute=0（每日 5:00）
+> 原 plist 错配 Month=6 Day=17=一次性触发 → 7/18 修复为每日调度
+> 验证命令：`launchctl list | grep openclaw.bidding` 应有 `com.openclaw.bidding.6.17`
+
+**预期耗时**：05:00 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 1-2 分钟（channel-info 预检 + 4次 send，失败 sleep 5s 重试 1 次，v2.6 修复后几乎不需重试）。
+**质量门**：Step 7 verify_quality.py FAIL 时会写 CRITICAL 文件 + 飞书告警 + halt（2026-07-18 修复，原行为 8 项 FAIL 静默继续）。
 
 ### P0 修复（2026-07-06）：采购意向批次标题误当项目名
 
