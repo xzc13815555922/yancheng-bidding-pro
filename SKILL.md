@@ -16,6 +16,7 @@ records: 13820条原始（12站）→ unified.db tender:4048/award:4423/intentio
 
 > **v2.7 变更（2026-07-06）**：① P0 重复入库修复（tyc/yancheng_gov UNIQUE INDEX + make_id 去「采购包N」后缀）② P0 运营商报告金额单位 `*10000` 修复 ③ 飞书推送 cron v2.4→v2.6 升级 ④ 中小微企业专题（tender/intention 加 sme_target 列 + 报表加列） ⑤ P0 批次标题误作项目名修复（_json 嵌套 import + 单项目也用子项 name + extract_sme_target _URL_INDEX） ⑥ P4 enrich_details 高可信预算词优先 ⑦ P5 enrich_details 单位过滤修正（X万元/年不再被误判） ⑧ P6 enrich_details 全面优化（jszbcg 4 种资金来源 + OCR「米源」容错 + _parse_amount safe_float 防护 + tyc.notices UNIQUE INDEX 补齐）。详细见本 SKILL.md 「本轮修复清单（v2.5 → v2.6，2026-07-06）」section。
 > **v2.7.1 P0 修复（2026-07-12）**：run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修 7/6 起所有新批次 announcement 走批次名 fallback 的 P0 bug），MEMORY.md 加规则 9（scripts/utils/ dead code 警告）。详见本 SKILL.md 「本轮修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）」section。
+> **v2.8 软件工程治理（2026-07-18）**：① P0-1 拆 parse_html_detail（CC 106→1, 抽 _extract_purchaser + _extract_budget） ② P0-2 工单下发阿明拆 _parse_ycggzy_content（8/1 截止） ③ P0-3 CMMI Level 3 度量采集（collect_metrics.py 8 项度量） ④ NFR + DoD + 复杂度报告 + 依赖图 + CI workflow（本地保留） ⑤ 4 个新测试用例锁定 parse_html_detail 行为 ⑥ CMMI 等级 2.3→3.0。详见 docs/tasks/2026-07-18-task-ycggzy-拆分.md 工单。
 > **v2.6 变更（2026-06-26）**：① unified.db 新增 `other` 表（3031条，含 notice_subtype 细分）及 `project_links`/`project_chain`（tender×award 68%覆盖，均值20天周期/83.7%折扣率） ② `enrich_details.py` 解耦（1082→829行） ③ 新增 `reenrich.py`/`report_failed_bids.py`/`scripts/utils/expand_intention.py`/`enrich_amendment_opendate.py`/`build_project_links.py`。
 ---
 

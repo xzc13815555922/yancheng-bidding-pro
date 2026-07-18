@@ -293,181 +293,10 @@ def parse_html_detail(html: str, notice_type: str) -> Dict:
     text = _clean(_strip_html(html))
 
     # 发包单位：关键字后40字内，从chunk头部锚定匹配
-    chunk = _extract_after_keyword(text, PURCHASER_KEYWORDS, 40)
-    if chunk:
-        # 若chunk内部含有另一个采购人关键字且后接冒号，跳到冒号后（处理"书面提出（招标人：XXX）"型）
-        # 要求：关键字后第一个非空字符必须是冒号，否则是普通句中出现，不跳
-        for _inner_kw in PURCHASER_KEYWORDS:
-            _kw = re.sub(r'\s+', '', _inner_kw)
-            _pos = chunk.find(_kw)
-            if 1 < _pos <= 40:
-                _next = chunk[_pos + len(_kw):]
-                if _next and _next[0] in '：:':
-                    _after = re.sub(r'^[：:\s\xa0]+', '', _next)
-                    if len(_after) >= 4:
-                        chunk = _after
-                        break
-        chunk = re.sub(r'^[^一-龥a-zA-Z0-9]+', '', chunk)
-        # 在chunk中截断至首个中文列表标记（"一、二、1、"等），避免把项目名内容混入
-        chunk = re.split(r'[一二三四五六七八九十]\s*[、．.]', chunk)[0]
-        # 若chunk内有"名称："子串且在前15字内，直接从该位置提取（处理"采购包1...单位名称：XXX"型）
-        # 但只在名称前文很短时跳转，避免误跳到"采购内容：名称："
-        m_name = re.search(r'^[^，。]{0,15}名称[：:]', chunk)
-        if m_name:
-            chunk = chunk[m_name.end():]
-        # "信息单位名称：" 型标签前缀（fallback）
-        chunk = re.sub(r'^(?:信息)?(?:单位|机构|联系|地址)?(?:名称)?\s*[：:]\s*', '', chunk)
-        # 合同"甲方：" 型前缀
-        chunk = re.sub(r'^[甲乙丙丁][方部]?[）)）]*\s*[：:]\s*', '', chunk)
-        chunk = re.sub(r'^(?:为|是|由|自|经|向|系|即|指|该|此|因|被|对|关|有|其|名|称|本)\s*', '', chunk)
-        m = re.match(rf'.{{2,35}}?(?:{_ORG_SUFFIX})', chunk)
-        if m:
-            val = m.group(0).strip()
-            val = _clean_purchaser_val(val)
-            if 3 <= len(val) < 45 and _is_valid_purchaser(val):  # P1-3-ext B 2026-07-07: 4<→3<= 真放 3 字
-                result["purchaser"] = val
+    # 拆函数调用（2026-07-18 软件工程 P0-1 实施，行为不变）
+    _extract_purchaser(text, result)
+    _extract_budget(text, result)
 
-    # 敘事句兜底：无标签页面的几种常见格式
-    if "purchaser" not in result:
-        # 格式8: "因COMPANY经营/业务/发展需要" — dushi/jscn 询价公告首句，排最前避免被格式3标题行误匹配
-        m = re.search(
-            rf'因([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))(?:[经业]营|工作|发展)需要',
-            text
-        )
-        # 格式1: 「因经营需要，XX公司需对/拟对...」
-        if not m:
-            m = re.search(
-                rf'(?:因[经业]营需要[，,]|因工作需要[，,]|为[满完]足[^，。]{{0,10}}[，,])'
-                rf'([^，。\s]{{4,35}}(?:{_ORG_SUFFIX}))[^，。]{{0,8}}(?:需|拟|将|决|计划)',
-                text
-            )
-        # 格式2: 「XX公司负责实施/决定/现对...」
-        if not m:
-            m = re.search(
-                rf'([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*(?:负责实施|决定对|现对|现需|计划对)',
-                text
-            )
-        # 格式3: meta description 以公司名开头，紧接项目名（无分隔符）
-        if not m:
-            m = re.search(rf'(?:^|[ 。\n，])([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))(?:[^，。\s]{{0,15}}(?:项目|工程|服务|采购|询价))', text)
-        # 格式4: "XXX公司在...进行采购/通过...方式" — dongfang 首句主语格式
-        if not m:
-            m = re.search(rf'([^，。\n\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*在[^，。]{{0,20}}(?:项目|工程|服务|采购|询价|通过)', text)
-        # 格式5: "招标人为XXX" 无冒号格式（jszbcg PDF常见，跨行合并后匹配）
-        if not m:
-            _t5 = re.sub(r'\s+', ' ', text)
-            m = re.search(rf'招标人为([^，。]{{4,40}}(?:{_ORG_SUFFIX}))', _t5)
-        # 格式6: "XXX公司关于…公告/招标" — 自营平台标题/正文主语格式（yueda/dongfang 常见）
-        if not m:
-            m = re.search(rf'([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))关于[^，。]{{2,30}}(?:公告|招标|询价|竞争性)', text)
-        # 格式7: "Copyright…公司名 版权所有" — 自营平台页脚版权行兜底（dongfang/dushi/jscn）
-        if not m:
-            m = re.search(
-                rf'(?:Copyright[^\n]*?|版权所有[：:]\s*)([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))',
-                text, re.IGNORECASE
-            )
-        if m:
-            val = m.group(1).strip()
-            # 剥除序号前缀（"一、XXX" → "XXX"，格式2匹配含序号时需清除）
-            val = re.sub(r'^[一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩][、.．]\s*', '', val)
-            val = _clean_purchaser_val(val)
-            # 过滤误匹配：政府采购平台名、通用语句片段
-            if (_is_valid_purchaser(val) and
-                    not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位",
-                                               "招投标", "公共资源", "技术支持"))):
-                result["purchaser"] = val
-
-    # 格式9（独立兜底）: 文档末尾签署机构 "XXX局\n2026年06月24日" — yancheng_gov 意向公告常见
-    # 必须在其他格式之后独立执行，避免被 Format3 坏值拦截
-    if "purchaser" not in result:
-        # 用"打印此页"锚定文档尾部，避免误匹配正文中的"XXX 2026年XX月XX日"
-        m9 = re.search(
-            r'([^，。\s]{4,30})\s+\d{4}年\d{1,2}月\d{1,2}日\s*打印此页',
-            text
-        )
-        if m9:
-            val9 = _clean_purchaser_val(m9.group(1).strip())
-            if _is_valid_purchaser(val9):
-                result["purchaser"] = val9
-
-    # 清除 "关于" 前缀（如"关于凤依府项目..."被误提取）
-    if result.get("purchaser", "").startswith("关于"):
-        result["purchaser"] = result["purchaser"][2:].lstrip()
-    # 最终校验：如果最终值仍不像机构名则清空
-    if not _is_valid_purchaser(result.get("purchaser", "")):
-        result.pop("purchaser", None)
-
-    # 预算金额（过滤保证金等）
-    t_nospace = re.sub(r'\s+', '', text)
-
-    # 2026-07-06 P4: 高可信予算词优先匹配 (不被 BUDGET_EXCLUDE 误杀)
-    # 例: "预估项目总投资300万元" - kw后跟数字无冒号
-    _PRECISE_RE = re.compile(
-        r'(?:项目总投资|预估项目总投资|总投资额|项目总投资额|预估总投资|'
-        r'工程总投资额|项目概算总投资)'
-        r'[\s\S]{0,10}?(\d[\d.]*)\s*(万元|万|亿|元)'
-    )
-    m_precise = _PRECISE_RE.search(t_nospace)
-    if m_precise:
-        amount_raw = m_precise.group(1) + m_precise.group(2)
-        amount, unit = _parse_amount(amount_raw)
-        if amount and amount > 0 and 100 <= amount <= 5e10:
-            result["budget"] = amount
-            result["budget_unit"] = unit
-            result["budget_text"] = m_precise.group(0)[:40]
-            return result
-
-    for kw in BUDGET_KEYWORDS:
-        chunk = _extract_after_keyword(text, [kw], 60)
-        if not chunk:
-            # fallback: keyword直接跟数字无冒号（如"最高限价28300元"）
-            m_direct = re.search(re.escape(kw) + r'[^\d，。]{0,3}([\d,.]+(?:\.\d+)?)\s*(万元|亿|元)', t_nospace)
-            if m_direct:
-                chunk = m_direct.group(1) + m_direct.group(2)
-            else:
-                # 2026-06-25 P1-6 表格 fallback: kw 本身含单位 (如"采购预算(万元)"),
-                # 且后跟数字+单位 (yancheng_gov 意向公告表格列名格式)
-                if any(c in kw for c in '()（）'):
-                    # 提取括号里的单位
-                    m_unit = re.search(r'[（(](\S+?)[）)]', kw)
-                    if m_unit:
-                        bracket_unit = m_unit.group(1)
-                        # 2026-06-25 P2-3 修复: 支持 '采购预算' 与 '(万元)' 之间有
-                        # 任意空白/换行 (如 '采购预算  \n(万元)'),
-                        # 原 re.escape(kw) 模式要求连续, 漏 23/23 拆分型 case.
-                        # 新模式: 基础词 + 任意空白 + (单位) + 任意字符(非贪婪) + 数字
-                        m_table = re.search(
-                            re.escape(re.sub(r'[（(].*?[）)]', '', kw).strip())  # 去掉括号的 '采购预算'
-                            + r'\s*[（(]\s*' + re.escape(bracket_unit) + r'\s*[）)]'
-                            + r'[\s\S]{0,30}?(\d[\d,.]*)',
-                            text
-                        )
-                        if m_table:
-                            chunk = m_table.group(1) + bracket_unit
-                        else:
-                            continue
-                    else:
-                        continue
-                else:
-                    continue
-        ctx = text[max(0, text.find(kw) - 20):text.find(kw) + 80] if kw in text else ""
-        if any(ex in ctx for ex in BUDGET_EXCLUDE):
-            continue
-        amount, unit = _parse_amount(chunk)
-        # 基础合理性过滤：金额必须有明确单位；金额范围 100元~50亿元
-        has_unit = bool(re.search(r'[万元亿]', chunk))
-        if amount and amount > 0 and has_unit and 100 <= amount <= 5e10:
-            # 过滤文件工本费/单价误提取（jszbcg常见："500元/套""225元/吨""售后不退"）
-            # 2026-07-06 P4: 修正 "X万元/年" / "X万元/月" (年/月付款合同额) 被误判为单价
-            # 只过滤 "X元/Y" (真实单价, Y 是吨套件个平), 不过滤 "X万元/年"
-            if re.search(r'\d+\.?\d*\s*元[/.](?:吨|套|件|个|平米|㎡|份|台|只|张|本|块)', chunk):
-                continue
-            if re.search(r'售后不退|工本费|文件费|汇款账', chunk):
-                continue
-            result["budget"] = amount
-            result["budget_unit"] = unit
-            result["budget_text"] = chunk[:40]
-            break
 
     # 意向公告表格兜底：预算列是纯数字（单位在列头"万元"），格式 |<数字>|YYYY-MM|
     # 列头与数据之间隔多列，30字窗口无法覆盖，需独立提取
@@ -885,3 +714,193 @@ if __name__ == "__main__":
         from pathlib import Path as _Path
         print("\n[同步] 重建 unified.db ...")
         subprocess.run([_sys.executable, str(_Path(__file__).parent / "build_unified.py")], check=False)
+
+# ─────────────────────────────────────────────
+# 拆出的子函数（2026-07-18 软件工程 P0-1 实施）
+# ─────────────────────────────────────────────
+
+def _extract_purchaser(text: str, result: Dict) -> None:
+    """从详情页文本中提取 purchaser 字段并写入 result（in-place）。
+    2026-07-18 拆函数：从 parse_html_detail (CC=106) 抽出第一段。
+    行为完全等价，不修改任何正则/逻辑。
+    """
+    chunk = _extract_after_keyword(text, PURCHASER_KEYWORDS, 40)
+    if chunk:
+        # 若chunk内部含有另一个采购人关键字且后接冒号，跳到冒号后（处理"书面提出（招标人：XXX）"型）
+        # 要求：关键字后第一个非空字符必须是冒号，否则是普通句中出现，不跳
+        for _inner_kw in PURCHASER_KEYWORDS:
+            _kw = re.sub(r'\s+', '', _inner_kw)
+            _pos = chunk.find(_kw)
+            if 1 < _pos <= 40:
+                _next = chunk[_pos + len(_kw):]
+                if _next and _next[0] in '：:':
+                    _after = re.sub(r'^[：:\s\xa0]+', '', _next)
+                    if len(_after) >= 4:
+                        chunk = _after
+                        break
+        chunk = re.sub(r'^[^一-龥a-zA-Z0-9]+', '', chunk)
+        # 在chunk中截断至首个中文列表标记（"一、二、1、"等），避免把项目名内容混入
+        chunk = re.split(r'[一二三四五六七八九十]\s*[、．.]', chunk)[0]
+        # 若chunk内有"名称："子串且在前15字内，直接从该位置提取（处理"采购包1...单位名称：XXX"型）
+        # 但只在名称前文很短时跳转，避免误跳到"采购内容：名称："
+        m_name = re.search(r'^[^，。]{0,15}名称[：:]', chunk)
+        if m_name:
+            chunk = chunk[m_name.end():]
+        # "信息单位名称：" 型标签前缀（fallback）
+        chunk = re.sub(r'^(?:信息)?(?:单位|机构|联系|地址)?(?:名称)?\s*[：:]\s*', '', chunk)
+        # 合同"甲方：" 型前缀
+        chunk = re.sub(r'^[甲乙丙丁][方部]?[）)）]*\s*[：:]\s*', '', chunk)
+        chunk = re.sub(r'^(?:为|是|由|自|经|向|系|即|指|该|此|因|被|对|关|有|其|名|称|本)\s*', '', chunk)
+        m = re.match(rf'.{{2,35}}?(?:{_ORG_SUFFIX})', chunk)
+        if m:
+            val = m.group(0).strip()
+            val = _clean_purchaser_val(val)
+            if 3 <= len(val) < 45 and _is_valid_purchaser(val):  # P1-3-ext B 2026-07-07: 4<→3<= 真放 3 字
+                result["purchaser"] = val
+
+    # 敘事句兜底：无标签页面的几种常见格式
+    if "purchaser" not in result:
+        # 格式8: "因COMPANY经营/业务/发展需要" — dushi/jscn 询价公告首句，排最前避免被格式3标题行误匹配
+        m = re.search(
+            rf'因([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))(?:[经业]营|工作|发展)需要',
+            text
+        )
+        # 格式1: 「因经营需要，XX公司需对/拟对...」
+        if not m:
+            m = re.search(
+                rf'(?:因[经业]营需要[，,]|因工作需要[，,]|为[满完]足[^，。]{{0,10}}[，,])'
+                rf'([^，。\s]{{4,35}}(?:{_ORG_SUFFIX}))[^，。]{{0,8}}(?:需|拟|将|决|计划)',
+                text
+            )
+        # 格式2: 「XX公司负责实施/决定/现对...」
+        if not m:
+            m = re.search(
+                rf'([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*(?:负责实施|决定对|现对|现需|计划对)',
+                text
+            )
+        # 格式3: meta description 以公司名开头，紧接项目名（无分隔符）
+        if not m:
+            m = re.search(rf'(?:^|[ 。\n，])([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))(?:[^，。\s]{{0,15}}(?:项目|工程|服务|采购|询价))', text)
+        # 格式4: "XXX公司在...进行采购/通过...方式" — dongfang 首句主语格式
+        if not m:
+            m = re.search(rf'([^，。\n\s]{{4,40}}(?:{_ORG_SUFFIX}))\s*在[^，。]{{0,20}}(?:项目|工程|服务|采购|询价|通过)', text)
+        # 格式5: "招标人为XXX" 无冒号格式（jszbcg PDF常见，跨行合并后匹配）
+        if not m:
+            _t5 = re.sub(r'\s+', ' ', text)
+            m = re.search(rf'招标人为([^，。]{{4,40}}(?:{_ORG_SUFFIX}))', _t5)
+        # 格式6: "XXX公司关于…公告/招标" — 自营平台标题/正文主语格式（yueda/dongfang 常见）
+        if not m:
+            m = re.search(rf'([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))关于[^，。]{{2,30}}(?:公告|招标|询价|竞争性)', text)
+        # 格式7: "Copyright…公司名 版权所有" — 自营平台页脚版权行兜底（dongfang/dushi/jscn）
+        if not m:
+            m = re.search(
+                rf'(?:Copyright[^\n]*?|版权所有[：:]\s*)([^，。\s]{{4,40}}(?:{_ORG_SUFFIX}))',
+                text, re.IGNORECASE
+            )
+        if m:
+            val = m.group(1).strip()
+            # 剥除序号前缀（"一、XXX" → "XXX"，格式2匹配含序号时需清除）
+            val = re.sub(r'^[一二三四五六七八九十①②③④⑤⑥⑦⑧⑨⑩][、.．]\s*', '', val)
+            val = _clean_purchaser_val(val)
+            # 过滤误匹配：政府采购平台名、通用语句片段
+            if (_is_valid_purchaser(val) and
+                    not any(x in val for x in ("采购网", "政府采购", "交易中心", "招标平台", "该单位", "本单位",
+                                               "招投标", "公共资源", "技术支持"))):
+                result["purchaser"] = val
+
+    # 格式9（独立兜底）: 文档末尾签署机构 "XXX局\n2026年06月24日" — yancheng_gov 意向公告常见
+    # 必须在其他格式之后独立执行，避免被 Format3 坏值拦截
+    if "purchaser" not in result:
+        # 用"打印此页"锚定文档尾部，避免误匹配正文中的"XXX 2026年XX月XX日"
+        m9 = re.search(
+            r'([^，。\s]{4,30})\s+\d{4}年\d{1,2}月\d{1,2}日\s*打印此页',
+            text
+        )
+        if m9:
+            val9 = _clean_purchaser_val(m9.group(1).strip())
+            if _is_valid_purchaser(val9):
+                result["purchaser"] = val9
+
+    # 清除 "关于" 前缀（如"关于凤依府项目..."被误提取）
+    if result.get("purchaser", "").startswith("关于"):
+        result["purchaser"] = result["purchaser"][2:].lstrip()
+    # 最终校验：如果最终值仍不像机构名则清空
+    if not _is_valid_purchaser(result.get("purchaser", "")):
+        result.pop("purchaser", None)
+
+def _extract_budget(text: str, result: Dict) -> None:
+    """从详情页文本中提取 budget 字段并写入 result（in-place）。
+    2026-07-18 拆函数：从 parse_html_detail (CC=106) 抽出第二段。
+    行为完全等价，不修改任何正则/逻辑。
+    """
+    # 预算金额（过滤保证金等）
+    t_nospace = re.sub(r'\s+', '', text)
+
+    # 2026-07-06 P4: 高可信予算词优先匹配 (不被 BUDGET_EXCLUDE 误杀)
+    # 例: "预估项目总投资300万元" - kw后跟数字无冒号
+    _PRECISE_RE = re.compile(
+        r'(?:项目总投资|预估项目总投资|总投资额|项目总投资额|预估总投资|'
+        r'工程总投资额|项目概算总投资)'
+        r'[\s\S]{0,10}?(\d[\d.]*)\s*(万元|万|亿|元)'
+    )
+    m_precise = _PRECISE_RE.search(t_nospace)
+    if m_precise:
+        amount_raw = m_precise.group(1) + m_precise.group(2)
+        amount, unit = _parse_amount(amount_raw)
+        if amount and amount > 0 and 100 <= amount <= 5e10:
+            result["budget"] = amount
+            result["budget_unit"] = unit
+            result["budget_text"] = m_precise.group(0)[:40]
+            return result
+
+    for kw in BUDGET_KEYWORDS:
+        chunk = _extract_after_keyword(text, [kw], 60)
+        if not chunk:
+            # fallback: keyword直接跟数字无冒号（如"最高限价28300元"）
+            m_direct = re.search(re.escape(kw) + r'[^\d，。]{0,3}([\d,.]+(?:\.\d+)?)\s*(万元|亿|元)', t_nospace)
+            if m_direct:
+                chunk = m_direct.group(1) + m_direct.group(2)
+            else:
+                # 2026-06-25 P1-6 表格 fallback: kw 本身含单位 (如"采购预算(万元)"),
+                # 且后跟数字+单位 (yancheng_gov 意向公告表格列名格式)
+                if any(c in kw for c in '()（）'):
+                    # 提取括号里的单位
+                    m_unit = re.search(r'[（(](\S+?)[）)]', kw)
+                    if m_unit:
+                        bracket_unit = m_unit.group(1)
+                        # 2026-06-25 P2-3 修复: 支持 '采购预算' 与 '(万元)' 之间有
+                        # 任意空白/换行 (如 '采购预算  \n(万元)'),
+                        # 原 re.escape(kw) 模式要求连续, 漏 23/23 拆分型 case.
+                        # 新模式: 基础词 + 任意空白 + (单位) + 任意字符(非贪婪) + 数字
+                        m_table = re.search(
+                            re.escape(re.sub(r'[（(].*?[）)]', '', kw).strip())  # 去掉括号的 '采购预算'
+                            + r'\s*[（(]\s*' + re.escape(bracket_unit) + r'\s*[）)]'
+                            + r'[\s\S]{0,30}?(\d[\d,.]*)',
+                            text
+                        )
+                        if m_table:
+                            chunk = m_table.group(1) + bracket_unit
+                        else:
+                            continue
+                    else:
+                        continue
+                else:
+                    continue
+        ctx = text[max(0, text.find(kw) - 20):text.find(kw) + 80] if kw in text else ""
+        if any(ex in ctx for ex in BUDGET_EXCLUDE):
+            continue
+        amount, unit = _parse_amount(chunk)
+        # 基础合理性过滤：金额必须有明确单位；金额范围 100元~50亿元
+        has_unit = bool(re.search(r'[万元亿]', chunk))
+        if amount and amount > 0 and has_unit and 100 <= amount <= 5e10:
+            # 过滤文件工本费/单价误提取（jszbcg常见："500元/套""225元/吨""售后不退"）
+            # 2026-07-06 P4: 修正 "X万元/年" / "X万元/月" (年/月付款合同额) 被误判为单价
+            # 只过滤 "X元/Y" (真实单价, Y 是吨套件个平), 不过滤 "X万元/年"
+            if re.search(r'\d+\.?\d*\s*元[/.](?:吨|套|件|个|平米|㎡|份|台|只|张|本|块)', chunk):
+                continue
+            if re.search(r'售后不退|工本费|文件费|汇款账', chunk):
+                continue
+            result["budget"] = amount
+            result["budget_unit"] = unit
+            result["budget_text"] = chunk[:40]
+            break
