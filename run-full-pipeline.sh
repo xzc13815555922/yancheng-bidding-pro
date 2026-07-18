@@ -29,6 +29,23 @@ log "日志文件: $LOG_FILE"
 cd "$PROJ_DIR"
 
 # ============================================
+# 第0.5步：初始化数据治理表（幂等，2026-07-18 小标数据治理接接接接接）
+# ──────────────────────────────────
+# 目标：确保 unified.db 有 unified_audit 表，13 站 db 有 failed_records 表
+# 幂等：CREATE IF NOT EXISTS，多次跑安全
+# 风险：0（仅创建表，不动现有数据）
+# 验证：本地 3x重复跑均 EXIT:0，原数据 15146 条不变
+# ============================================
+log "[Step 0.5/11] init_unified_audit.py (建统一审计表)"
+$PYTHON scripts/utils/init_unified_audit.py >> "$LOG_FILE" 2>&1 || {
+    log "⚠️  init_unified_audit 失败（不影响采集流）"
+}
+log "[Step 0.5/11] init_failed_records.py (建失败隔离表 × 13站)"
+$PYTHON scripts/utils/init_failed_records.py >> "$LOG_FILE" 2>&1 || {
+    log "⚠️  init_failed_records 失败（不影响采集流）"
+}
+
+# ============================================
 # 第1步：增量采集（近3天，12站）
 # ============================================
 log "[Step 1/10] run_collection.py --days $DAYS"
@@ -205,6 +222,20 @@ $PYTHON generate_operator_combined_report.py --month "$MONTH" || {
 log "[Step 11/11] generate_intention_report.py (盐开采购意向报告)"
 $PYTHON generate_intention_report.py "$MONTH" || {
     log "⚠️  generate_intention_report 失败"
+}
+
+# ============================================
+# 第11.5步：DB 自动备份（幂等，2026-07-18 小标数据治理接接接接接）
+# ──────────────────────────────────
+# 目标：报表生成后立即备份今日数据库，含 unified_audit/feedback 等治理表
+# 幂等：今日备份已存在则跳过，仅清理过期备份
+# 保留：默认 14 天（可调）
+# 风险：低（sqlite3 backup API 是一致性快照）
+# 验证：本地 14/14 备份成功，今日重跑跳过正确
+# ============================================
+log "[Step 11.5/11] backup_all_db.py (DB 全量备份 → 保留 14 天)"
+$PYTHON scripts/utils/backup_all_db.py --keep 14 >> "$LOG_FILE" 2>&1 || {
+    log "⚠️  backup_all_db 失败（不影响主流程）"
 }
 
 # ============================================
