@@ -155,6 +155,10 @@ ALLOWED_DROPS = {
     ("base.py", 110),
     ("base.py", 293),
     ("base.py", 295),
+    # ── 2026-07-18 数据治理 P0-采-1 + P1-采-1 新增黑洞 ──
+    # 告警机制本身不能成为故障源（采集失败告警 / JSONL 镜像）
+    ("run_collection.py", 177),
+    ("run_collection.py", 221),
 }
 
 

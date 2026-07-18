@@ -141,6 +141,41 @@ def run(start_date: str, end_date: str, site_filter: str = ""):
         except Exception as e:
             logger.error(f"[{site_key}] 采集失败: {e}", exc_info=True)
             results[site_key] = {"error": str(e)}
+            # 数据治理 P0-采-1（2026-07-18 治标）：单站失败触发飞书 CRITICAL 告警
+            # 设计原则：仅增量加告警，不改采集逻辑、不改 results、不改 return value
+            # 容错：飞书调用本身失败时不抛异常（报警机制本身不能成为故障源）
+            try:
+                import subprocess
+                from datetime import datetime
+                ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                crit_path = f"/tmp/openclaw/CRITICAL_collect_{site_key}_{ts_str}.md"
+                with open(crit_path, "w", encoding="utf-8") as f:
+                    f.write(
+                        f"# CRITICAL: ypb 单站采集失败\n\n"
+                        f"- 站点: {site_key}\n"
+                        f"- 时间: {datetime.now().isoformat()}\n"
+                        f"- 错误: {str(e)[:500]}\n"
+                        f"- 采集区间: {start_date} ~ {end_date}\n"
+                    )
+                logger.info(f"📝 CRITICAL(collect_{site_key}) 已写: {crit_path}")
+                alert_msg = (
+                    f"🚨 CRITICAL: ypb 单站采集失败\n"
+                    f"站点: {site_key}\n"
+                    f"错误: {str(e)[:300]}\n"
+                    f"CRIT: {crit_path}\n"
+                    f"注：其他站点继续采，后续 Step 7 质量门 + Step 11 报表仍可运行"
+                )
+                subprocess.run(
+                    ["openclaw", "message", "send",
+                     "--channel", "feishu",
+                     "--account", "executor",
+                     "--target", "open_id:ou_09c0f6a80ee31cd768628371292a145b",
+                     "--message", alert_msg],
+                    timeout=10, capture_output=True
+                )
+                logger.info(f"📨 飞书 CRITICAL 已发（站点 {site_key}）")
+            except Exception as alert_err:
+                logger.warning(f"⚠️ 告警机制本身失败（不影响采集流）：{alert_err}")
 
     # 采集后修复：从 raw_json 回填可推导的字段
     _repair_derived_fields(site_filter)
@@ -149,14 +184,42 @@ def run(start_date: str, end_date: str, site_filter: str = ""):
     logger.info("\n" + "="*50)
     logger.info("采集汇总:")
     grand_total = grand_new = 0
+    success_count = 0
+    fail_count = 0
     for sk, r in results.items():
         if "error" in r:
             logger.info(f"  {sk}: 失败 — {r['error'][:60]}")
+            fail_count += 1
         else:
             logger.info(f"  {sk}: {r['total']}条 新增{r['new']}条 ({r['elapsed']:.1f}s)")
             grand_total += r["total"]
             grand_new += r["new"]
+            success_count += 1
     logger.info(f"  总计: {grand_total}条 新增{grand_new}条")
+    # 数据治理 P1-采-1（2026-07-18）：镜像输出汇总到 JSONL（不动现有 logger）
+    try:
+        import json as _json
+        from datetime import datetime as _dt
+        jsonl_path = DATA_DIR.parent / "logs" / f"collect_summary_{_dt.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
+        jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(jsonl_path, "w", encoding="utf-8") as f:
+            _json.dump({
+                "ts": _dt.now().isoformat(),
+                "trace_id": f"collect-{_dt.now().strftime('%Y%m%d%H%M%S')}",
+                "event": "summary",
+                "success_count": success_count,
+                "fail_count": fail_count,
+                "grand_total": grand_total,
+                "grand_new": grand_new,
+                "sites": {
+                    sk: ({"error": r["error"]} if "error" in r
+                         else {"total": r["total"], "new": r["new"], "elapsed": round(r["elapsed"], 1)})
+                    for sk, r in results.items()
+                }
+            }, f, ensure_ascii=False, indent=2)
+        logger.info(f"📊 JSONL 镜像: {jsonl_path}")
+    except Exception as jsonl_err:
+        logger.warning(f"⚠️ JSONL 镜像失败（不影响主流程）：{jsonl_err}")
     return results
 
 
