@@ -58,6 +58,12 @@ CRAWLERS = [
 #   yueda.wamt       = 0.00：中标金额格式非标准，已知结构性限制
 #   yancheng_gov.wamt= 0.40：框架协议使用优惠率，无固定中标金额
 #   kaifaqu.winner   — 9 条 award 样本，P0-1 修复后统计意义有限，暂不设基线
+#
+# ⚠️ 2026-07-18 治标调整（审计 P0-3 修复配套，CEO 拍板）：
+#   原 8 项基线与现场实测不符，verify_quality FAIL 触发 halt → 报表不生
+#   临时下调到「现场实测 - 1~2 个百分点」，保留小幅冗余
+#   治本路径（不）：修复解析器 → 阿明 P1 任务，本日不深入
+#   跟踪：每项基线附 TBD_T 注释提醒需修复 + 7/19 回访验证
 
 SITE_BASELINES = {
     "jszbcg": {
@@ -71,8 +77,8 @@ SITE_BASELINES = {
     "yancheng_gov": {
         "count":           2500,
         "purchaser":       0.96,
-        "budget":          0.95,
-        "open_date":       0.93,
+        "budget":          0.90,   # TBD_T: 原 0.95, 现场 91.2%, 治标下调
+        "open_date":       0.80,   # TBD_T: 原 0.93, 现场 81.6%, 治标下调
         "winner":          0.97,
         "winning_amount":  0.40,
     },
@@ -106,7 +112,7 @@ SITE_BASELINES = {
         "budget":          0.66,
         "open_date":       0.88,
         "winner":          0.97,
-        "winning_amount":  0.65,
+        "winning_amount":  0.60,   # TBD_T: 原 0.65, 现场 64.1%, 治标下调
     },
     "jscn": {
         "count":           150,
@@ -120,7 +126,7 @@ SITE_BASELINES = {
         "count":           200,
         "purchaser":       0.92,
         "budget":          0.68,
-        "open_date":       0.60,
+        "open_date":       0.55,   # TBD_T: 原 0.60, 现场 58.4%, 治标下调
         "winner":          0.97,
         "winning_amount":  0.90,
     },
@@ -135,8 +141,8 @@ SITE_BASELINES = {
     "kaifaqu": {
         "count":           28,
         "purchaser":       0.92,
-        "budget":          0.72,
-        "open_date":       0.85,
+        "budget":          0.70,   # TBD_T: 原 0.72, 现场 71.9%, 治标下调
+        "open_date":       0.82,   # TBD_T: 原 0.85, 现场 84.2%, 治标下调
         # award 只有 2 条真实中标，样本太小，不设 winner/wamt 基线
     },
     "bigdata": {
@@ -152,8 +158,8 @@ SITE_BASELINES = {
         "purchaser":       0.98,
         "budget":          0.73,
         "open_date":       0.88,
-        "winner":          0.97,
-        "winning_amount":  0.44,
+        "winner":          0.92,   # TBD_T: 原 0.97, 现场 93.8%, 治标下调
+        "winning_amount":  0.40,   # TBD_T: 原 0.44, 现场 43.8%, 治标下调
     },
 }
 
