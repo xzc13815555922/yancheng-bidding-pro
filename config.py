@@ -77,8 +77,11 @@ SITE_BASELINES = {
     "yancheng_gov": {
         "count":           2500,
         "purchaser":       0.96,
-        "budget":          0.90,   # TBD_T: 原 0.95, 现场 91.2%, 治标下调
-        "open_date":       0.80,   # TBD_T: 原 0.93, 现场 81.6%, 治标下调
+        # budget 漂移观察 2026-07-19: 89.5% (671/750), WAF 拦截侧因
+        "budget":          0.90,   # critical (TBD_T: 原 0.95, 现场 91.2%, 治标下调)
+        "budget_warn":     0.85,   # warning: 缓冲带，低于只写 STDOUT 不飞书
+        "open_date":       0.80,   # critical (TBD_T: 原 0.93, 现场 81.6%, 治标下调)
+        "open_date_warn":  0.75,
         "winner":          0.97,
         "winning_amount":  0.40,
     },
@@ -113,6 +116,7 @@ SITE_BASELINES = {
         "open_date":       0.88,
         "winner":          0.97,
         "winning_amount":  0.60,   # TBD_T: 原 0.65, 现场 64.1%, 治标下调
+        "winning_amount_warn": 0.55,
     },
     "jscn": {
         "count":           150,
@@ -127,6 +131,7 @@ SITE_BASELINES = {
         "purchaser":       0.92,
         "budget":          0.68,
         "open_date":       0.55,   # TBD_T: 原 0.60, 现场 58.4%, 治标下调
+        "open_date_warn":  0.50,
         "winner":          0.97,
         "winning_amount":  0.90,
     },
@@ -142,7 +147,9 @@ SITE_BASELINES = {
         "count":           28,
         "purchaser":       0.92,
         "budget":          0.70,   # TBD_T: 原 0.72, 现场 71.9%, 治标下调
+        "budget_warn":     0.65,
         "open_date":       0.82,   # TBD_T: 原 0.85, 现场 84.2%, 治标下调
+        "open_date_warn":  0.77,
         # award 只有 2 条真实中标，样本太小，不设 winner/wamt 基线
     },
     "bigdata": {
@@ -159,7 +166,9 @@ SITE_BASELINES = {
         "budget":          0.73,
         "open_date":       0.88,
         "winner":          0.92,   # TBD_T: 原 0.97, 现场 93.8%, 治标下调
+        "winner_warn":     0.87,
         "winning_amount":  0.40,   # TBD_T: 原 0.44, 现场 43.8%, 治标下调
+        "winning_amount_warn": 0.35,
     },
 }
 

@@ -98,6 +98,17 @@ $PYTHON enrich_details.py || {
 }
 
 # ============================================
+# 第3.2步：yancheng_gov Playwright 兜底 (2026-07-19 P1-1 修复)
+# 上一步 enrich_details 会把被 WAF 拦截的 yancheng_gov 详情页标记为
+# detail_fetched=2 (不是 successes)。本步用 Playwright 重抓这些 URL。
+# 如未装 Playwright 或记录为空则跳。
+# ============================================
+log "[Step 3.2/10] enrich_yancheng_gov_playwright.py (WAF-blocked detail Fetched=2 → Playwright 兜底)"
+$PYTHON enrich_yancheng_gov_playwright.py 2>> "$LOG_FILE" || {
+    log "⚠️  enrich_yancheng_gov_playwright 失败（可能 Playwright 未装或今天无 WAF 拦截），继续"
+}
+
+# ============================================
 # 第3.5步：提取中小微企业标签 (P1-2026-07-06, CEO 拍板)
 # 从已抓的 MD 缓存提取 sme_target, 写 unified.db
 # 用于报表清单加列「中小微」 (专门=绿/优惠=橙)
@@ -176,18 +187,40 @@ if [ "$VERIFY_RC" -ne 0 ]; then
     log "📝 CRITICAL(verify_quality) 已写: $CRIT_QUALITY"
     log "📋 FAIL 摘要:"
     echo "$FAIL_SUMMARY" | while read -r line; do log "    $line"; done
-    # 飞书告警（消息文本先放到变量，避免引号嵌套崩 bash）
-    ALERT_MSG="🚨 CRITICAL: ybp 数据质量基线不达标（verify_quality 退出码 ${VERIFY_RC}）
+    # ── P1-3 告警抑制（2026-07-19 小标加）：同一天 verify_quality FAIL 只飞书发 1 次 ─────
+    # 背景：7/18 一天飞书群发了 55 条消息，其中多条都是同一类 FAIL 重复刷报
+    # 机制：检查 /tmp/openclaw/verify_quality_alert_sent.json，今日已发则只写 STDOUT，不重推
+    ALERT_SENT_FILE="/tmp/openclaw/verify_quality_alert_sent.json"
+    TODAY="$(date +%Y-%m-%d)"
+    TODAY_ALREADY="0"
+    if [ -f "$ALERT_SENT_FILE" ]; then
+        TODAY_ALREADY=$(grep -oE "\"date\":\"${TODAY}\"" "$ALERT_SENT_FILE" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    if [ "${TODAY_ALREADY}" -gt 0 ]; then
+        log "⚠️ 今日 verify_quality FAIL 告警已发送过 (${TODAY_ALREADY} 次)，抑制重推"
+    else
+        # 飞书告警（消息文本先放到变量，避免引号嵌套崩 bash）
+        ALERT_MSG="🚨 CRITICAL: ybp 数据质量基线不达标（verify_quality 退出码 ${VERIFY_RC}）
 ypb 全流程已暂停，避免把失格数据传给下游报表。
 详情：CRIT_QUALITY=${CRIT_QUALITY}
 当日失败摘要：
 ${FAIL_SUMMARY}
 行动建议：检查基线失败站点 → 重跑采集 → 重跑 verify_quality。"
-    openclaw message send \
-        --channel feishu \
-        --account executor \
-        --target "open_id:ou_09c0f6a80ee31cd768628371292a145b" \
-        --message "$ALERT_MSG" >> "$LOG_FILE" 2>&1 || log "⚠️ 质量告警推送失败（不影响 halt）"
+        # 推送到招投标群（@CEO）+ 个人 fallback
+        # 2026-07-18 修：CEO 个人 open_id 推送 99992361 cross app，改用群推送
+        if openclaw message send \
+            --channel feishu \
+            --account executor \
+            --target "chat:oc_922159a1e552ff69e99a99c1bd4d598b" \
+            --message "@阿泽 ${ALERT_MSG}" >> "$LOG_FILE" 2>&1; then
+            # 成功：写抑制记账文件（原子追加）
+            printf '{"date":"%s","ts":"%s","type":"verify_quality_fail"}\n' \
+                "$(date +%Y-%m-%d)" "$(date -Iseconds)" >> "$ALERT_SENT_FILE" || true
+            log "✅ 质量告警已发送 + 已记账抑制"
+        else
+            log "⚠️ 质量告警推送失败（不影响 halt）"
+        fi
+    fi
     log "❌ 数据质量不达标，pipeline 退出码 $VERIFY_RC（暂停后续步骤）"
     exit "$VERIFY_RC"
 fi

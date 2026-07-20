@@ -714,18 +714,19 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 
 **说明**：`export_excel.py` 脚本保留，需要时手动运行即可，不进生产流程。
 
-### 修复后 cron 任务清单（当前状态）
+### 修复后 cron 任务清单（当前状态 — 2026-07-19 修订）
 
 | cron 时间 | 任务 | 调用的脚本 | 超时 | 调度器 |
 |---------|------|-----------|------|--------|
-| 05:00 全流程 | `yancheng-bidding-pro daily 5:00 full pipeline` | `bash run-full-pipeline.sh` （由 run-bidding.sh 接力） | 3600s | **launchd plist `com.openclaw.bidding.6.17`**（不是 crontab！） |
-| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.6)` | openclaw message send ×4（push-pdfs.sh v3.0，含预检探测 + 失败重试） | 1800s | openclaw cron f605317e |
+| 05:00 全流程 | `yancheng-bidding-pro daily 5:00 full pipeline` | `bash run-full-pipeline.sh` | 3600s | **openclaw cron `cd8c4dbf-9327-48ac-a4a2-091810dadecf`** |
+| 08:35 推送 | `yancheng-bidding-pro push 4 PDFs to feishu group 8:30 (v2.6)` | openclaw message send ×4（push-pdfs.sh v3.0） | 1800s | openclaw cron `f605317e-bb5c-4a0d-b605-efdc31a609b4` |
 
-> **⚠️ 重要说明（2026-07-18 小标审计 P1-5 修复）**：
-> ypb **不在**用户 crontab 中（`crontab -l` 无 bid 行），实际由 **macOS launchd** 调度：
-> `~/Library/LaunchAgents/com.openclaw.bidding.6.17.plist` StartCalendarInterval 仅 Hour=5 / Minute=0（每日 5:00）
-> 原 plist 错配 Month=6 Day=17=一次性触发 → 7/18 修复为每日调度
-> 验证命令：`launchctl list | grep openclaw.bidding` 应有 `com.openclaw.bidding.6.17`
+> **⚠️ 重要说明（2026-07-19 小标 P0 修订）**：
+> ypb 完全由 **openclaw cron 调度**（`openclaw cron list` 看 cd8c4dbf / f605317e）。
+> 7/19 9:59 起 macOS launchd plist `com.openclaw.bidding.6.17` 已退役（归档为 `_deprecated_com.openclaw.bidding.6.17.20260719_095854.plist`）。
+> 7/19 之前 SKILL.md 写的「由 run-bidding.sh 接力 / launchd 调度」是错误的——新版 ybp 是 openclaw cron 独立跑，run-bidding.sh 不调新版。
+> 验证命令：`openclaw cron list | grep yancheng-bidding`（两条 cron 都应 ok）。
+> 以前老命令 `launchctl list | grep openclaw.bidding` 返回空是**正常**的，不再需要。
 
 **预期耗时**：05:00 完整跑 ≈ 8-10 分钟（天眼查 4min + 12站采集 4min + 4份报告生成 <1min）。08:35 推送 ≈ 1-2 分钟（channel-info 预检 + 4次 send，失败 sleep 5s 重试 1 次，v2.6 修复后几乎不需重试）。
 **质量门**：Step 7 verify_quality.py FAIL 时会写 CRITICAL 文件 + 飞书告警 + halt（2026-07-18 修复，原行为 8 项 FAIL 静默继续）。

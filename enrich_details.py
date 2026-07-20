@@ -15,9 +15,21 @@
   2. sufu    → 从 raw_json / 已有字段回写（无 HTTP）
   3. HTML 类 → requests 抓详情页 + 正则解析
   4. yancheng_gov → requests 试，403 则标记 detail_fetched=2（需 Playwright，后续单独处理）
+
+──────────────────────────────────────
+【2026-07-19 P1-1 修复】小标补 WAF 检测 + jitter
+背景：yancheng_gov 使用「知道创宇 CloudWAF」，滑动限流时返回 HTTP 200 + WAF
+      拦截文本（不是 HTTP 403），原代码错把拦截页当正常页解析 → 字段全 NULL +
+      detail_fetched=1 → Playwright 兜底不动触发。
+3 处改动：
+  1. WAF_KEYWORDS：拦 Knownsec / 创宇云 / CloudWAF 等关键字
+  2. _is_waf_block(html)：bool 判据
+  3. HTTP 分支里：检测到 WAF → status=2 (fallback, 等下游 Playwright 接手)
+  4. _fetch_jitter：随机 1.5-4s jitter + site-specific 额外 delay
 """
 import json
 import logging
+import random
 import re
 import sqlite3
 import sys
@@ -48,8 +60,10 @@ PURCHASER_KEYWORDS = [
     "单位名称",
 ]
 BUDGET_KEYWORDS = [
-    "项目预算", "采购预算", "控制价", "最高限价", "限价",
-    "总投资", "投资额", "预算金额", "总预算",
+    # 2026-07-19 P0-2 重排 (小标): 高可信预算词优先，避免被 "最高限价：3800元/吨" 误抢
+    "预算金额", "项目预算", "采购预算", "控制价", "总预算",
+    "限价", "最高限价",  # 最高限价位置靠后，避免误认单价为项目预算
+    "总投资", "投资额",
     "项目规模", "服务费", "监理费", "工程造价", "项目造价",
     "合同估算价", "合同预估金额", "合同预计金额", "合同预计总金额",
     "估算价", "估算总投资",
@@ -126,6 +140,34 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9",
 }
+
+
+# ─────────────────────────────────────────────
+# 【2026-07-19 小标补充】WAF 拦截检测 — P1-1 修复
+# ─────────────────────────────────────────────
+WAF_KEYWORDS = (
+    "Knownsec CloudWAF",      # 知道创宇英文指纹
+    "创宇盾提示您",              # 知道创宇中文标题
+    "CloudWAF: Your request", # WAF 英文提示
+    "knownsec",                # 小写变体
+    "rule_id=",                # WAF 返回页面必有该字段
+    "本期网站管理员设置拦截",     # 创宇盾文案变体
+)
+
+# site_key → jitter 区间（秒杀）。yancheng_gov CloudWAF 高频拦截，必须加长。
+SITE_JITTER = {
+    "yancheng_gov": (1.5, 4.0),
+}
+DEFAULT_JITTER = (0.5, 1.0)
+
+
+def _is_waf_block(html: str) -> bool:
+    """检测返回 HTML 是否为 WAF 拦截页（限流/防火墙）。"""
+    if not html:
+        return False
+    # 取前 4KB 判断，避免全文本扫描
+    head = html[:4096]
+    return any(kw in head for kw in WAF_KEYWORDS)
 
 
 # ─────────────────────────────────────────────
@@ -616,28 +658,35 @@ def enrich_site(site_key: str, limit: int = 0, dry_run: bool = False):
                             html = resp.content.decode(enc, errors="replace")
                         except Exception:
                             html = resp.text
-                        fields = parse_html_detail(html, ntype)
-                        # 保存本地缓存
-                        try:
-                            sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
-                            from html_common import save_page_md
-                            title = conn.execute(
-                                "SELECT project_name FROM notices WHERE id=?", (rid,)
-                            ).fetchone()["project_name"]
-                            saved = save_page_md(html, detail_url, site_key, title)
-                            if saved:
-                                conn.execute(
-                                    "UPDATE notices SET page_path=? WHERE id=?", (saved, rid)
-                                )
-                                conn.commit()
-                        except Exception as e:
-                            logger.warning(f'[enrich_outer_loop] L799 {e}')
+                        # 【2026-07-19 P1-1】WAF 拦截检测 —— HTML 200 但 body 是 CloudWAF 拦截页
+                        if _is_waf_block(html):
+                            logger.debug(f"  WAF-blocked ({site_key}): {detail_url[:60]}")
+                            status = 2  # fallback 到下游 Playwright
+                        else:
+                            fields = parse_html_detail(html, ntype)
+                            # 保存本地缓存
+                            try:
+                                sys.path.insert(0, str(Path(__file__).parent / "crawlers"))
+                                from html_common import save_page_md
+                                title = conn.execute(
+                                    "SELECT project_name FROM notices WHERE id=?", (rid,)
+                                ).fetchone()["project_name"]
+                                saved = save_page_md(html, detail_url, site_key, title)
+                                if saved:
+                                    conn.execute(
+                                        "UPDATE notices SET page_path=? WHERE id=?", (saved, rid)
+                                    )
+                                    conn.commit()
+                            except Exception as e:
+                                logger.warning(f'[enrich_outer_loop] L799 {e}')
                     else:
                         status = 2
                 except Exception as e:
                     logger.debug(f"  请求异常 {site_key} {detail_url[:60]}: {e}")
                     status = 2
-                time.sleep(0.5)
+                # 【2026-07-19 P1-1】jitter 限流 —— site-specific 区段。yancheng_gov CloudWAF 滑动窗 0.5s 不够。
+                _jlo, _jhi = SITE_JITTER.get(site_key, DEFAULT_JITTER)
+                time.sleep(random.uniform(_jlo, _jhi))
         else:
             status = 2  # 无 detail_url
 
@@ -896,7 +945,11 @@ def _extract_budget(text: str, result: Dict) -> None:
             # 过滤文件工本费/单价误提取（jszbcg常见："500元/套""225元/吨""售后不退"）
             # 2026-07-06 P4: 修正 "X万元/年" / "X万元/月" (年/月付款合同额) 被误判为单价
             # 只过滤 "X元/Y" (真实单价, Y 是吨套件个平), 不过滤 "X万元/年"
-            if re.search(r'\d+\.?\d*\s*元[/.](?:吨|套|件|个|平米|㎡|份|台|只|张|本|块)', chunk):
+            # 2026-07-19 P0-1 修复 (小标): 之前 chunk 前后都过滤单价，会误杀 "预算金额：175万元 + 最高限价：3800元/吨"
+            # 新策略: 只过滤当 X元/Y 出现在"当前已提取的金额"附近 ≤ 8 字符范围，才说明这是单价
+            m_first_num = re.search(r'\d[\d,.]*', chunk)
+            m_unit_unit = re.search(r'元[/.](?:吨|套|件|个|平米|㎡|份|台|只|张|本|块)', chunk)
+            if m_first_num and m_unit_unit and m_unit_unit.start() - m_first_num.end() <= 8:
                 continue
             if re.search(r'售后不退|工本费|文件费|汇款账', chunk):
                 continue

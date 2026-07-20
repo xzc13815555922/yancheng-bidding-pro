@@ -28,6 +28,9 @@ data/backup/
 output/*.pdf
 output/
 output/*.docx
+
+# 本地备份文件（7/19 创建的 .bak.20260719 不入库）
+*.bak.*
 tmp_*.py
 
 # 本地审计报告（不入库）
