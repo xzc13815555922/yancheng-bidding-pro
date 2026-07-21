@@ -184,9 +184,14 @@ class JSZbcgCrawlerPro(BaseCrawler):
 
         base = _safe(project_name)
         md_path = MD_DIR / f"{base}.md"
+        # 2026-07-22 P0 修复：MD 已存在时直接复用，跳过 OCR
+        # 之前逻辑：md_path.exists() → 换 _0001 后缀新路径继续 OCR
+        # 后果：每天早上 5 点 cron 把已入库的 ~60% 旧项目重 OCR 一遍
+        #      单站耗时 23.3 min（7/22 实测），其中 60% 是浪费
+        # 修法：缓存命中直接 return str(md_path)
         if md_path.exists():
-            suffix = abs(hash(record_id)) % 9999 + 1
-            md_path = MD_DIR / f"{base}_{suffix:04d}.md"
+            logger.info(f"  [MD缓存命中] {project_name} → {md_path.name}")
+            return str(md_path)
 
         text = ""
         try:

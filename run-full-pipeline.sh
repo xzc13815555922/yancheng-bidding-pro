@@ -4,15 +4,28 @@
 # 流程：12站采集 → 天眼查采集 → 富化 → 打标 → 统一库 → 质量验证 → 3份报告 → Excel导出
 #
 # 用法: bash run-full-pipeline.sh [--days N] [--skip-tyc]
-#   --days N      采集近N天数据（默认3）
+#   --days N      采集近N天数据（默认智能：周日7天，其余2天）
 #   --skip-tyc    跳过天眼查采集（调试用）
 #   --month M     报告月份，如 2026-06（默认当月）
+#
+# 2026-07-22 智能默认：cron 历史 30 天 4 次 error（13.3% 失败率），
+# 周日兜底采 7 天捞回漏的；其余日子采 2 天（当日+前一日）减少 OCR 重复。
+# 配合 jszbcg.py MD 缓存复用修复（2026-07-22 P0），单站耗时 23min→6min。
 
 set -euo pipefail
 
 PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
 PYTHON="/usr/bin/python3"
-DAYS="${2:-3}"
+
+# 智能默认 --days：周日 7 天兜底，其余 2 天
+DAYS="${2:-}"
+if [ -z "$DAYS" ]; then
+    if [ "$(date +%u)" = "7" ]; then
+        DAYS=7
+    else
+        DAYS=2
+    fi
+fi
 MONTH="${4:-$(date +%Y-%m)}"
 LOG_FILE="/tmp/openclaw/ybp-pipeline-$(date +%Y%m%d_%H%M%S).log"
 
@@ -22,7 +35,11 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
 log "====== yancheng-bidding-pro 全流程开始 ======"
 log "工作目录: $PROJ_DIR"
-log "采集天数: $DAYS"
+if [ "$(date +%u)" = "7" ]; then
+    log "采集天数: $DAYS (周日兜底模式)"
+else
+    log "采集天数: $DAYS (常规模式)"
+fi
 log "报告月份: $MONTH"
 log "日志文件: $LOG_FILE"
 
