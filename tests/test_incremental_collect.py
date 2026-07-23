@@ -98,26 +98,30 @@ def test_detect_id_anchor():
     print("  PASS test_detect_id_anchor")
 
 
-def test_write_md_notify():
-    """md 按站子目录落盘 (老板 2026-07-23 要求分站保存)."""
+def test_build_media_paths_复用page_path():
+    """2026-07-23 老板修正: 不写第二份 md, 直接拿 notices.page_path 作群附件."""
     with tempfile.TemporaryDirectory() as tmp:
-        md_root = Path(tmp) / "md_notify"
-        with patch.object(ic, "MD_NOTIFY_DIR", md_root):
-            records = [
-                {"site": "sufu", "site_name": "苏服务", "notice_type": "tender",
-                 "publish_date": "2026-07-23", "project_name": "测试项目A",
-                 "purchaser": "X街道", "detail_url": "https://x", "page_path": "/tmp/p.md",
-                 "std_district": "盐南", "proj_major_cat": None,
-                 "id": "abcdef1234567890abcdef", "amount_raw": 50000, "budget_unit": "元"},
-            ]
-            paths = ic.write_md_notify(records, "2026-07-23_1030")
-            assert len(paths) == 1
-            assert paths[0].parent.name == "sufu"
-            assert "abcdef1234567890" in paths[0].name
-            content = paths[0].read_text()
-            assert "测试项目A" in content
-            assert "盐南" in content
-        print("  PASS test_write_md_notify")
+        # 造两个真实 md, 模拟项目原有的 data/pages/<site>/{项目名}.md
+        page_a_dir = Path(tmp) / "sufu"
+        page_a_dir.mkdir(parents=True, exist_ok=True)
+        page_a = page_a_dir / "OPC_项目A.md"
+        page_a.write_text("# 项目A 详情页 MD", encoding="utf-8")
+        page_b_dir = Path(tmp) / "yancheng_gov"
+        page_b_dir.mkdir(parents=True, exist_ok=True)
+        page_b = page_b_dir / "幼儿园采购_B.md"
+        page_b.write_text("# 项目B 详情页 MD", encoding="utf-8")
+        records = [
+            {"id": "a1", "page_path": str(page_a)},
+            {"id": "b1", "page_path": str(page_b)},
+            {"id": "c1", "page_path": "/nonexistent/path.md"},  # 不存在
+            {"id": "d1", "page_path": ""},                       # 空
+            {"id": "e1", "page_path": None},                     # None
+        ]
+        paths = ic.build_media_paths(records)
+        assert len(paths) == 2, f"预期 2 份, 实际 {len(paths)}"
+        assert page_a in paths
+        assert page_b in paths
+    print("  PASS test_build_media_paths_复用page_path")
 
 
 def test_render_message():
@@ -165,7 +169,7 @@ if __name__ == "__main__":
     test_is_target_district()
     test_format_amount()
     test_detect_id_anchor()
-    test_write_md_notify()
+    test_build_media_paths_复用page_path()
     test_render_message()
     test_load_save_state_幂等()
     print("\n✅ 全 6 项烟雾测试通过")

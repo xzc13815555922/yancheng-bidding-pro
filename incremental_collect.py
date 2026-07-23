@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-incremental_collect.py — 10 分钟增量采集主入口 (10 分钟 cron 用)
+incremental_collect.py — 1 小时增量采集主入口 (cron 调用)
 
-【2026-07-23 P0-需求】小标
+【2026-07-23 P0-需求】小标 (最终版)
 背景:
-  老板要求: 10 分钟一次增量采 → 有新增通报飞书群 (发包方/项目名/链接 + 详情MD)
-           5:00 大流程取消, 8:35 PDF 推送保留
+  老板需求: 工作日 8-20 点每小时采通一次, 周末 8 点一次
+           群通报: 盐南/经开未分类项目, 格式 = 网站 + 项目 + 金额 + MD
+           tyc 7 点, PDF 8 点 (8 点 cron-morning 一气诋成)
   原 5:00 cron (cd8c4dbf) 每天只跑一次, 新增项目要等 24 小时才被发现.
 
 输入:
   --mode {fast, slow, full}
-     fast: 跑 11 站 (跳过 jszbcg, 默认 10min 模式)
-     slow: 只跑 jszbcg (60min 模式, OCR 重)
+     fast: 跑 11 站 (跳过 jszbcg, 默认 1 小时模式)
+     slow: 只跑 jszbcg (60min 模式, OCR 重) — 本版本未启用
      full: 跑 12 站全跑 (调试用)
   --dry-run   跑采/富化/打标/统计, 不推飞书 (调试用)
   --no-push   跑采/富化/打标, 但不推飞书 (静默模式)
@@ -19,18 +20,22 @@ incremental_collect.py — 10 分钟增量采集主入口 (10 分钟 cron 用)
 输出:
   - 各 site db (data/<site>.db) 已写入
   - unified.db (data/unified.db) 已重建
-  - /tmp/openclaw/incremental_state.json (游标 + 频次控制, 非永久数据)
-  - 当有新项目时:
-      飞书群推送 (oc_922159a1e552ff69e99a99c1bd4d598b):
-        - 文本: 发包方 / 项目名 / 链接
-        - 附件: data/md_notify/<site>/{项目名}_{id前缀}.md  (每条项目一份, 永久保存)
-        - 群内附件按站分子目录, 不清理.
+  - /tmp/openclaw/incremental_state.json (游标 + 频次控制, /tmp/ 重启可丢)
+  - 有新增且过盐南/经开未分类筛 → 飞书群推送 oc_922159a1e552ff69e99a99c1bd4d598b:
+      文本: 🚨 盐南/经开未分类新项目 + 项目列表 + 金额
+      附件: page_path 指向的 data/pages/<site>/{项目名}.md (项目原有详情页 MD)
 
 设计原则:
   - 复用 run_collection.py (避免重写 12 个 crawler)
-  - 复用 download_site_pages.py / enrich_details / 打标脚本
+  - 群通报附件页 MD 直接复用项目原有的 data/pages/<site>/{项目名}.md
+    (该路径在每条 notices.page_path, crawler/download_site_pages 采的时候已生成)
   - 增量判断: site db.notices.id 锚定 (去重稳, 不受 crawler 重复抓影响)
-  - 群通报 throttle: 空新增不发, 无上限, 走单批推送
+  - 群通报 throttle: 空新增或过滤后空集不发
+
+撞车保护 (F-1~F-4):
+  - flock 文件锁 (/tmp/openclaw/ybp-collect.lock), 保证同一项目同时只有 1 个采通
+  - PID file 供其他 cron 检查 + sleep 重试
+  - cron 调度用 /usr/bin/flock -n 双重保护
 """
 import argparse
 import json
@@ -46,14 +51,13 @@ PROJECT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(PROJECT))
 
 DATA_DIR = PROJECT / "data"
-MD_NOTIFY_DIR = DATA_DIR / "md_notify"  # 群通报用的 md, 永久保存, 按站分子目录
 LOG_DIR = PROJECT / "logs"
 STATE_FILE = Path("/tmp/openclaw/incremental_state.json")
+LOCK_FILE = Path("/tmp/openclaw/ybp-collect.lock")
 GROUP_CHAT = "oc_922159a1e552ff69e99a99c1bd4d598b"
-SITE_TIMEOUT = 180  # 单站超时 (s, 8 站加起来允许 ~25 分钟, 10 分钟 cron 重试靠下次 job 完成)
+SITE_TIMEOUT = 180  # 单站超时 (s)
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
-MD_NOTIFY_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -302,44 +306,30 @@ def detect_new_since(last_per_site_ids: dict) -> list:
 
 
 # ────────────────────────────────────────
-# 群通报用 md 落盘 (按站分子目录, 永久保存)
-# 格式: data/md_notify/<site>/{项目名}_{id前缀16}.md
-# 内容: 概要信息 + 各字段 (避免重复, 跟 data/pages/ 详情页 MD 区分)
-# 现有 data/pages/{site}/{项目名}.md 是详情页抓下来的完整页面 MD,
-# 这里群通报 md 是一份摘要, 用于群附件速览.
+# 群通报用 md = 项目原有的 data/pages/<site>/{项目名}.md
+# (2026-07-23 老板最终要求: 项目原本就是分站保存, 不要重复写第二份)
+#
+# page_path 是 crawler/download_site_pages 采的时候存到 notices.page_path 的,
+# 比如 data/pages/sufu/OPC 绿色创想家全球青年创新创业挑战赛复赛决赛活动项目.md
+# 这些文件项目固有, 与本次改造无关. 群通报直接传这些文件.
 # ────────────────────────────────────────
-def write_md_notify(new_records: list, batch_ts: str) -> list:
-    """
-    对每条新记录写一份群通报用 md.
-    返回: list of Path (写入的 md 文件路径), 传给 feishu_push 作 --media.
-    """
+def build_media_paths(new_records: list) -> list:
+    """从 new_records 的 page_path 集合成飞书 --media 参数列表. 缺失则跳过."""
     paths = []
+    missing = []
     for r in new_records:
-        site_dir = MD_NOTIFY_DIR / r["site"]
-        site_dir.mkdir(parents=True, exist_ok=True)
-        # 文件名: 项目名_时间戳_前缀16.md
-        safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in (r["project_name"] or "untitled"))[:50]
-        prefix = r["id"][:16] if r["id"] else "x" * 16
-        fname = f"{safe_name}_{batch_ts}_{prefix}.md"
-        fpath = site_dir / fname
-        lines = [
-            f"# {r['project_name'] or '(无项目名)'}",
-            "",
-            f"- **站点**: {r['site_name']} ({r['site']})",
-            f"- **公告类型**: {r['notice_type']}",
-            f"- **采购方**: {r['purchaser'] or '-'}",
-            f"- **发布日期**: {r['publish_date'] or '-'}",
-            f"- **所属区县**: {r.get('std_district') or '-'}",
-            f"- **项目类别**: {r.get('proj_major_cat') or '-'}",
-            f"- **详情链接**: {r['detail_url'] or '-'}",
-            f"- **详情页 MD**: `{r.get('page_path') or '-'}`",
-            f"- **内部 ID**: `{r['id']}`",
-            f"- **推送时间**: {batch_ts}",
-            "",
-        ]
-        fpath.write_text("\n".join(lines), encoding="utf-8")
-        paths.append(fpath)
-    log.info(f"[md_notify] 已写 {len(paths)} 份 (按站子目录: {MD_NOTIFY_DIR}/<site>/)")
+        pp = r.get("page_path")
+        if not pp:
+            missing.append(r["id"])
+            continue
+        p = Path(pp)
+        if p.exists() and p.is_file():
+            paths.append(p)
+        else:
+            missing.append(r["id"])
+    if missing:
+        log.warning(f"[media] {len(missing)} 条记录无有效 page_path (未进群附件): {missing[:3]}...")
+    log.info(f"[media] 群附件数: {len(paths)} (指向项目原有 data/pages/ md)")
     return paths
 
 
@@ -389,76 +379,159 @@ def feishu_push(md_paths: list, message: str):
         log.warning(f"[推送] stderr: {r.stderr[:500]}")
 
 
+# ─────────────────────────────────────────
+# 撞车保护 (F-1~F-4)
+# 背景: 8 点 cron-morning 采通 + PDF 可能拖到 9 点,
+# 9-20 点 cron-collect 每小时一次, 会与早上撞车.
+# 保护:
+#   F-1: try_lock() (fcntl flock 独占文件锁) — 拿不到锁则退让
+#   F-2: PID file 备查, 存储当前采通的 PID
+#   F-3: 主流程超时 900s (15 min) 兑底, 超时则尽量 kill 子进程
+#   F-4: cron 调度用 flock -n (已在 deploy_crons.py 中)
+# ─────────────────────────────────────────
+import fcntl
+
+def try_lock(timeout: int = 1) -> bool:
+    """非阻塞文件锁. 返回 True=拿到, False=别人跑着.
+    /tmp/openclaw/ybp-collect.lock (LOCK_FILE)
+    锁与锁一起释放: 用全局 _lock_fd 保存句柄,
+    进程退出时由 OS 自动释放.
+    """
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    global _lock_fd
+    fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fd.write(str(__import__("os").getpid()))
+        fd.flush()
+        _lock_fd = fd  # 保活, 进程退出时 os 自动解锁
+        return True
+    except (BlockingIOError, OSError):
+        fd.close()
+        return False
+
+
+_lock_fd = None
+
+
+def write_pid():
+    """存本进程 PID 到 state, 供其他 cron 检查."""
+    try:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        state = {}
+        if STATE_FILE.exists():
+            try: state = json.loads(STATE_FILE.read_text())
+            except Exception: pass
+        state["current_pid"] = __import__("os").getpid()
+        STATE_FILE.write_text(json.dumps(state, ensure_ascii=False))
+    except Exception as e:
+        log.warning(f"[pid] 写 PID 失败: {e}")
+
+
+def wait_for_lock_release(max_wait: int = 300) -> bool:
+    """等锁释放, 最长 max_wait 秒. 防止 cron 跑起时另个 cron 刚好在尾巴."""
+    import time as _t
+    waited = 0
+    while waited < max_wait:
+        if try_lock():
+            return True
+        log.info(f"[lock] 另一个采通仍在跑, sleep 60s (已等 {waited}s)")
+        _t.sleep(60)
+        waited += 60
+    log.warning(f"[lock] 等锁 {max_wait}s 仍未释放, 放弃 (交给下次 cron)")
+    return False
+
+
 # ────────────────────────────────────────
 # 主流程
 # ────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["full", "fast", "slow"], default="fast",
-                    help="full=12站全跑; fast=跳过jszbcg(默认10min); slow=只跑jszbcg(每60min)")
+                    help="full=12站全跑; fast=跳过jszbcg(默认1小时); slow=只跑jszbcg(每60min)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-push", action="store_true")
+    ap.add_argument("--no-wait", action="store_true",
+                    help="拿不到锁不等, 立刻退出 (本次 cron 不要重查)")
+    ap.add_argument("--force", action="store_true",
+                    help="强制跳锁 (调试用, 可能撞库)")
     args = ap.parse_args()
 
     today = datetime.now().strftime("%Y-%m-%d")
     state = load_state()
     last_per_site_ids = state.get("last_per_site_ids", {})
 
-    # 决定本次跑哪些站
-    if args.mode == "full":
-        sites = FAST_SITES + SLOW_SITES
-    elif args.mode == "fast":
-        sites = FAST_SITES
-    else:  # slow
-        sites = SLOW_SITES
+    # ── F-1 撞车保护 ──
+    if not args.force:
+        if not try_lock():
+            if args.no_wait:
+                log.warning("[lock] 另一采通仍在跑, 立即退出 (--no-wait)")
+                return
+            log.warning("[lock] 另一采通仍在跑, 等待释放 (最多 5min)")
+            if not wait_for_lock_release(max_wait=300):
+                log.warning("[lock] 等锁超时, 本次不跑")
+                return
+        write_pid()
 
-    # 频率控制: jszbcg 至少 60 分钟一次
-    slow_skip = False
-    if "jszbcg" in sites:
-        last_slow = state.get("last_slow_at")
-        if last_slow:
-            try:
-                last_t = datetime.fromisoformat(last_slow)
-                if (datetime.now() - last_t).total_seconds() < 3600:
-                    slow_skip = True
-            except Exception:
-                pass
-        if slow_skip:
-            sites = [s for s in sites if s != "jszbcg"]
-            log.info("[slow] jszbcg 距离上次 < 60min, 跳过")
+    try:
+        # 决定本次跑哪些站
+        if args.mode == "full":
+            sites = FAST_SITES + SLOW_SITES
+        elif args.mode == "fast":
+            sites = FAST_SITES
+        else:  # slow
+            sites = SLOW_SITES
 
-    # Step 1-6.5
-    step1_collect(today, sites)
-    step25_download_pages()
-    step26_expand_intention()
-    step3_enrich()
-    step_sm_run("3.5")
-    step45_tags()
-    step6_build()
-    step_sm_run("6.5")
+        # 频率控制: jszbcg 至少 60 分钟一次
+        if "jszbcg" in sites:
+            last_slow = state.get("last_slow_at")
+            if last_slow:
+                try:
+                    last_t = datetime.fromisoformat(last_slow)
+                    if (datetime.now() - last_t).total_seconds() < 3600:
+                        sites = [s for s in sites if s != "jszbcg"]
+                        log.info("[slow] jszbcg 距离上次 < 60min, 跳过")
+                except Exception:
+                    pass
 
-    # 标记 last_slow_at
-    if "jszbcg" in sites:
-        state["last_slow_at"] = datetime.now().isoformat(timespec="seconds")
+        # Step 1-6.5
+        step1_collect(today, sites)
+        step25_download_pages()
+        step26_expand_intention()
+        step3_enrich()
+        step_sm_run("3.5")
+        step45_tags()
+        step6_build()
+        step_sm_run("6.5")
 
-    # 探测新增
-    all_new = detect_new_since(last_per_site_ids)
-    batch_ts = datetime.now().strftime("%Y-%m-%d_%H%M")
-    # 群通报只推“盐南、经开未分类项目” (老板 2026-07-23 要要)
-    new_records = [r for r in all_new if is_target_district(r)]
-    log.info(f"[detect] 原始新增 {len(all_new)} 条 → 过滤后通报 {len(new_records)} 条 (盐南/经开 未分类)")
+        # 标记 last_slow_at
+        if "jszbcg" in sites:
+            state["last_slow_at"] = datetime.now().isoformat(timespec="seconds")
 
-    # 写游标
-    state["last_per_site_ids"] = last_per_site_ids
-    save_state(state)
+        # 探测新增 (含金额字段)
+        all_new = detect_new_since(last_per_site_ids)
+        batch_ts = datetime.now().strftime("%Y-%m-%d_%H%M")
+        # 群通报过滤 (老板 要要 2026-07-23): std_district 盐南/经开 且 未分类
+        new_records = [r for r in all_new if is_target_district(r)]
+        log.info(f"[detect] 原始 {len(all_new)} → 过滤后 {len(new_records)} (盐南/经开 未分类)")
 
-    # 推飞书 (空新增不发)
-    if new_records and not args.dry_run and not args.no_push:
-        md_paths = write_md_notify(new_records, batch_ts)
-        message = render_batch_message(new_records)
-        feishu_push(md_paths, message)
-    elif new_records == 0:
-        log.info("[detect] 无新增, 静默")
+        # 写游标
+        state["last_per_site_ids"] = last_per_site_ids
+        save_state(state)
+
+        # 推飞书
+        if new_records and not args.dry_run and not args.no_push:
+            media_paths = build_media_paths(new_records)
+            message = render_batch_message(new_records)
+            feishu_push(media_paths, message)
+        elif new_records == 0:
+            log.info("[detect] 无新增, 静默")
+    finally:
+        # ── F-1 释放锁 ──
+        try:
+            LOCK_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
