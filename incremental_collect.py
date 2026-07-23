@@ -260,8 +260,11 @@ def is_target_district(record: dict) -> bool:
     return False
 
 
-def detect_new_since(last_per_site_ids: dict) -> list:
-    """扫描所有 site.db, 返回上次没记录过的 id (本批新增, 含所有区县, 后调用 is_target_district 过滤)."""
+def detect_new_since(last_per_site_ids: dict, since_ts: str) -> list:
+    """扫描所有 site.db, 返回上次没记录过的 id (本批新增, 含所有区县, 后调用 is_target_district 过滤).
+
+    since_ts: ISO 格式时间参 (如 '2026-07-23 22:00'), 只取 crawl_time > since_ts 的记录.
+    """
     from config import SITES, SITE_NAMES
     new_records = []
     for site in SITES:
@@ -276,15 +279,20 @@ def detect_new_since(last_per_site_ids: dict) -> list:
             q = """
             SELECT id, site, notice_type, publish_date, project_name,
                    purchaser, detail_url, std_district, proj_major_cat, page_path,
-                   budget, winning_amount, budget_unit
+                   budget, winning_amount, budget_unit, crawl_time
             FROM notices
-            WHERE is_duplicate = 0 AND page_path IS NOT NULL AND page_path != ''
+            WHERE is_duplicate = 0
+              AND page_path IS NOT NULL AND page_path != ''
+              AND crawl_time > ?
             ORDER BY crawl_time ASC
             """
-            rows = cur.execute(q).fetchall()
+            rows = cur.execute(q, (since_ts,)).fetchall()
             update_seen = list(seen_ids)
             for r in rows:
                 if r["id"] in seen_ids:
+                    continue
+                # 只推招标/采购意向, 不推中标/其他公告 (老板要求是“新项目”)
+                if r["notice_type"] not in ("tender", "intention"):
                     continue
                 # 金额字段按 notice_type 取
                 if r["notice_type"] == "award":
@@ -525,7 +533,9 @@ def main():
             state["last_slow_at"] = datetime.now().isoformat(timespec="seconds")
 
         # 探测新增 (含金额字段)
-        all_new = detect_new_since(last_per_site_ids)
+        # 只查 last_run_ts 之后的记录, 避免全表全推 (P0-2 修)
+        all_new = detect_new_since(last_per_site_ids, state.get("last_run_ts") or "1970-01-01 00:00:00")
+        state["last_run_ts"] = datetime.now().isoformat(timespec="seconds")
         batch_ts = datetime.now().strftime("%Y-%m-%d_%H%M")
         # 群通报过滤 (老板 要要 2026-07-23): std_district 盐南/经开 且 未分类
         new_records = [r for r in all_new if is_target_district(r)]

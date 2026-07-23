@@ -84,15 +84,17 @@ def test_detect_id_anchor():
         c.commit()
         c.close()
 
-        # 首次进来全 3 条都视为新增
+        # 首次进来全 3 条都视为新增 (since_ts 1970-01-01 = 取全部)
         state = {}
         with patch.object(ic, "DATA_DIR", Path(tmp)):
-            new = ic.detect_new_since(state)
-        assert len(new) == 3, f"预期 3 条新增, 实际 {len(new)}"
-        # state 已记录 3 个 id, 再进来应该空
-        state2 = {"sufu": ["id001-old", "id002-yest", "id003-tod"]}
+            new = ic.detect_new_since(state, "1970-01-01 00:00:00")
+        # 注: id003-tod 是 award 类型, 2026-07-23 修复后只推 tender/intention, 所以应为 2
+        assert len(new) == 2, f"预期 2 条新增 (award 被滤), 实际 {len(new)}"
+        assert all(r["notice_type"] in ("tender", "intention") for r in new), f"应只推 tender/intention"
+        # state 已记录 id, 再进来应该空
+        state2 = {"sufu": [r["id"] for r in new]}
         with patch.object(ic, "DATA_DIR", Path(tmp)):
-            new2 = ic.detect_new_since(state2)
+            new2 = ic.detect_new_since(state2, "1970-01-01 00:00:00")
         assert len(new2) == 0, f"预期 0 条, 实际 {len(new2)}, 锚点 id 去重回归 BUG-4!"
 
     print("  PASS test_detect_id_anchor")
