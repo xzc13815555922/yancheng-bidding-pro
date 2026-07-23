@@ -2,7 +2,11 @@
 
 盐城市 12 个招标网站的数据采集、富化、分类和报告生成系统。
 
-**当前版本**：v2.7.1 | **数据量**：13820条原始 → unified.db 四表合计 13158 | **最后更新**：2026-07-12
+**当前版本**：v2.9 | **数据量**：13820条原始 → unified.db 四表合计 13158 | **最后更新**：2026-07-23
+
+> **v2.9 增量采集 + 新 cron 架构（2026-07-23）**：① 新增 `incremental_collect.py`（整点采通 + 群通报）② 新增 `run-morning.sh`（8:00 一气呵成：采通 → 群通报 → 4 份 PDF → 推群）③ 新增 `run-tyc.sh`（天眼查 7 点 cron）④ 撞车保护（flock 文件锁 + PID file + run-morning 25 分钟超时）⑤ 群通报格式改为「网站 + 项目 + 金额 + MD」（MD 复用项目原有 `data/pages/<site>/{项目名}.md`，不重复写）⑥ 群通报过滤「盐南/经开未分类项目」⑦ 3 个新 cron（ybp-tyc-daily 7:00 / ybp-morning 8:00 / ybp-collect-hourly 9-20 weekday）⑧ 老 cron `cd8c4dbf`（5:00 pipeline）+ `f605317e`（8:35 push）disable 保留回滚。详见下文「v2.9 增量架构」section。
+
+> **v2.7.1 P0 修复(2026-07-12)**：run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修 7/6 起所有新批次 announcement 走批次名 fallback 的 P0 bug，CEO 拍板方案 A）。详见下文「修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）」section。
 
 > **v2.6 变更说明（2026-06-26）**：① unified.db 新增第四张表 `other`（流标/终止/更正/合同，3031条）及 `project_links` 关联表（tender×award，2652条68%覆盖），新增 `project_chain` 视图 ② `enrich_details.py` 解耦（1082→829行，per-site 解析器迁到 `crawlers/jszbcg_parser.py` / `crawlers/sufu_parser.py`，测试迁到 `tests/`）③ `enrich_amendment_opendate.py` 新增 jszbcg `【更正公告】` 前缀剥离 ④ 新增 `reenrich.py`（补全统一入口）、`report_failed_bids.py`（流标报告）、`scripts/utils/expand_intention.py`（批次意向展开）。
 
@@ -518,3 +522,61 @@ python3 -m pytest tests/test_black_holes.py -v   # 恢复 pass
 - **T-1 允许历史 56 处黑洞**（列入 allowlist），新引入任何黑洞会立刻 fail
 
 详见 `pytest.ini` 与各 test 文件顶部 docstring。
+
+---
+
+## v2.9 增量架构（2026-07-23）
+
+### 背景
+老 pipeline 是单条 `run-full-pipeline.sh` 每天 5:00 跑一次，新增项目要等 24 小时才被发现。老板需求：高频采通 + 群通报快推 + 周末不漏。
+
+### 新增脚本
+
+| 脚本 | 调用方 | 作用 |
+|------|--------|------|
+| `incremental_collect.py` | cron-collect-hourly | 整点采通 + 群通报（含盐南/经开未分类过滤 + 群附件复用 page_path）|
+| `run-morning.sh` | cron-morning | 8:00 一气呵成：采通 → 群通报 → 4 份 PDF → 推群（25 分钟兜底）|
+| `run-tyc.sh` | cron-tyc-daily | 7:00 跑天眼查 + cookie 失败飞书告警 |
+| `deploy_crons.py` | 一次性 | 加 3 个新 cron + disable 2 个老 cron |
+
+### 3 个新 cron
+
+| Cron | 表达式 | 频率 | 作用 |
+|------|--------|------|------|
+| ybp-tyc-daily | `0 7 * * *` | 每天 7 点 | tyc 天眼查 |
+| ybp-morning | `0 8 * * *` | 每天 8 点 | 采通 + 4 份 PDF + 推群 |
+| ybp-collect-hourly | `0 9-20 * * 1-5` | 工作日 9-20 每小时 | 整点采通 |
+
+### 撞车保护（F-1 ~ F-4）
+- **F-1** `try_lock()`：fcntl flock 独占锁，防 cron 互抢
+- **F-2** PID file：供其他 cron 检查 + sleep 重试
+- **F-3** `run-morning.sh` 总超时 25 分钟（SIGTERM kill 子进程）
+- **F-4** `deploy_crons.py` 用 `flock -n` 包装 cron payload
+
+### 群通报规则（老板 2026-07-23 最终版）
+- **过滤**：`std_district IN ('盐南', '盐南高新区', '经开', '经开区')` 且 `proj_major_cat IS NULL`
+- **格式**：网站 + 项目 + 金额 + MD（不要发包方、链接）
+- **金额字段**：tender/intention 取 `budget`，award 取 `winning_amount`（自动元/万/亿换算）
+- **群附件**：直接传 `notices.page_path`（项目原有的 `data/pages/<site>/{项目名}.md`，不重复写）
+
+### 数据/存储层无变化
+- ✅ DB schema **0 改动**（12 站 site.db + unified.db + tyc.db）
+- ✅ MD 存储路径 **0 改动**（仍 `data/pages/<site>/{项目名}.md`）
+- ✅ PDF 存储路径 **0 改动**（仍 `output/盐开*.pdf`）
+- ✅ 现有爬虫/富化/打标/PDF 脚本 **0 行修改**
+- ✅ 群附件 md 复用项目原有的 page_path，**不新建 data/md_notify/**
+
+### Disable 但不删（回滚安全）
+- `cd8c4dbf-9327-48ac-a4a2-091810dadecf`（5:00 pipeline）：`enabled=false`
+- `f605317e-bb5c-4a0d-b605-efdc31a609b4`（8:35 push）：`enabled=false`
+- 回滚：`openclaw cron update --job-id <ID> --enabled true`
+
+### 测试
+- 6/6 单测过（`python3 tests/test_incremental_collect.py`）：
+  - `is_target_district`：过滤逻辑
+  - `format_amount`：元/万/亿换算
+  - `detect_id_anchor`：id 锚点回归
+  - `build_media_paths`：复用 page_path
+  - `render_message`：群消息格式
+  - `load_save_state`：游标读写幂等
+

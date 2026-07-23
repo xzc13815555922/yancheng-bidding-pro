@@ -9,10 +9,12 @@ outputs:
   - pdf     # output/盐开开标倒计时报告_YYYYMMDD.pdf（盐南+经开未分类开标倒计时）
   - pdf     # output/盐城通信运营商中标报告_YYYY-MM.pdf（三源合并：ybp+tyc+obm）
   - pdf     # output/盐开采购意向报告_YYYYMM.pdf（盐南+经开采购意向月报）
-version: v2.7
+version: v2.9
 status: 生产可用
-last_run: 2026-07-08
+last_run: 2026-07-23
 records: 13820条原始（12站）→ unified.db tender:4048/award:4423/intention:1205/other:3482；project_links:2875条(65%覆盖)
+
+> **v2.9 增量架构（2026-07-23）**：① 新增 `incremental_collect.py`（整点采通 + 群通报）② 新增 `run-morning.sh`（8:00 一气呵成）③ 新增 `run-tyc.sh`（天眼查 7 点 cron）④ 撞车保护（flock + PID file + 25min timeout）⑤ 群通报格式「网站 + 项目 + 金额 + MD」（MD 复用项目原有 `data/pages/<site>/{项目名}.md`，不重复写）⑥ 群通报过滤「盐南/经开未分类项目」⑦ 3 个新 cron（ybp-tyc-daily 7:00 / ybp-morning 8:00 / ybp-collect-hourly 9-20 weekday）⑧ 老 cron `cd8c4dbf`（5:00 pipeline）+ `f605317e`（8:35 push）disable 保留回滚。详见本 SKILL.md 「v2.9 增量架构」section。
 
 > **v2.7 变更（2026-07-06）**：① P0 重复入库修复（tyc/yancheng_gov UNIQUE INDEX + make_id 去「采购包N」后缀）② P0 运营商报告金额单位 `*10000` 修复 ③ 飞书推送 cron v2.4→v2.6 升级 ④ 中小微企业专题（tender/intention 加 sme_target 列 + 报表加列） ⑤ P0 批次标题误作项目名修复（_json 嵌套 import + 单项目也用子项 name + extract_sme_target _URL_INDEX） ⑥ P4 enrich_details 高可信预算词优先 ⑦ P5 enrich_details 单位过滤修正（X万元/年不再被误判） ⑧ P6 enrich_details 全面优化（jszbcg 4 种资金来源 + OCR「米源」容错 + _parse_amount safe_float 防护 + tyc.notices UNIQUE INDEX 补齐）。详细见本 SKILL.md 「本轮修复清单（v2.5 → v2.6，2026-07-06）」section。
 > **v2.7.1 P0 修复（2026-07-12）**：run-full-pipeline.sh 补 Step 2.6 expand_intention.py（修 7/6 起所有新批次 announcement 走批次名 fallback 的 P0 bug），MEMORY.md 加规则 9（scripts/utils/ dead code 警告）。详见本 SKILL.md 「本轮修复清单（v2.7 → v2.7.1，2026-07-12，CEO 拍板方案 A）」section。
@@ -759,4 +761,73 @@ unified.db：tender 3714→3674（-40）/ award 3634→3694（+60，含跨站去
 
 (详细 P0 批次标题修复见上面 "P0 修复（2026-07-06）：采购意向批次标题误当项目名" section)
 
+
+
+---
+
+## v2.9 增量架构（2026-07-23）
+
+### 触发
+老板 2026-07-23 提了第三版增量需求:
+- 工作日 8-20 点每小时 1 次采通（采集 + 富化 + 打标 + 建库）
+- 群通报盐南/经开未分类项目（格式：网站 + 项目 + 金额 + MD）
+- 每天 7 点天眼查（tyc 周末也跑）
+- 每天 8 点 4 份 PDF 推群
+- 周末周六周日每天 8 点一次采通 + PDF（频率降但保留）
+
+### 数据/存储层 0 改动
+- ✅ DB schema **0 改动**
+- ✅ MD 存储路径 **0 改动**（`data/pages/<site>/{项目名}.md`）
+- ✅ PDF 存储路径 **0 改动**（`output/盐开*.pdf`）
+- ✅ 现有爬虫/富化/打标/PDF 脚本 **0 行修改**
+- ✅ 群附件 md 复用项目原有的 page_path
+
+### 新增脚本
+
+| 脚本 | 调用方 | 作用 |
+|------|--------|------|
+| `incremental_collect.py` | cron-collect-hourly | 整点采通 + 群通报 |
+| `run-morning.sh` | cron-morning | 8:00 一气呵成 |
+| `run-tyc.sh` | cron-tyc-daily | 7:00 tyc + cookie 失败飞书告警 |
+| `deploy_crons.py` | 一次性 | 加 3 个新 cron + disable 2 个老 cron |
+
+### 3 个新 cron（deploy_crons.py 一键部署）
+
+| Cron | 表达式 | 频率 | 作用 |
+|------|--------|------|------|
+| ybp-tyc-daily | `0 7 * * *` | 每天 7 点 | tyc 天眼查 |
+| ybp-morning | `0 8 * * *` | 每天 8 点 | 采通 + 4 份 PDF + 推群（25 分钟兜底）|
+| ybp-collect-hourly | `0 9-20 * * 1-5` | 工作日 9-20 每小时 | 整点采通 |
+
+### 撞车保护（F-1 ~ F-4）
+- **F-1** `try_lock()`：fcntl flock 独占锁，防 cron 互抢
+- **F-2** PID file：供其他 cron 检查 + sleep 重试
+- **F-3** `run-morning.sh` 总超时 25 分钟（SIGTERM kill 子进程）
+- **F-4** `deploy_crons.py` 用 `flock -n` 包装 cron payload
+
+### 群通报规则
+- **过滤**：`std_district IN ('盐南', '盐南高新区', '经开', '经开区')` 且 `proj_major_cat IS NULL`
+- **格式**：🚨 盐南/经开未分类新项目 + 列表 `[ntype] **project** · 💰 amount`
+- **金额字段**：tender/intention 取 `budget`，award 取 `winning_amount`（自动 元/万/亿 换算）
+- **群附件**：直接传 `notices.page_path`（项目原有的 `data/pages/<site>/{项目名}.md`），**不新建 `data/md_notify/`**
+
+### Disable 但不删（rollback-safe）
+- `cd8c4dbf-9327-48ac-a4a2-091810dadecf`（5:00 pipeline）：`enabled=false`
+- `f605317e-bb5c-4a0d-b605-efdc31a609b4`（8:35 push）：`enabled=false`
+- 回滚命令：`openclaw cron update --job-id <ID> --enabled true`
+
+### 单测（6/6 透）
+- `is_target_district`：盐南/经开未分类过滤
+- `format_amount`：元/万/亿换算
+- `detect_id_anchor`：id 锚点去重（防 crawler 重复抓）
+- `build_media_paths`：复用 page_path（不存在/空/None 正确跳过）
+- `render_message`：通报格式
+- `load_save_state`：游标读写幂等
+
+### 一键部署
+```bash
+cd /Users/yc/.openclaw/workspace/yancheng-bidding-pro
+python3 deploy_crons.py --dry-run   # 看清楚要做什么
+python3 deploy_crons.py             # 实际加 3 个新 cron + disable 2 个老 cron
+```
 
