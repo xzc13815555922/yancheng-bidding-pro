@@ -183,13 +183,72 @@ def step6_build():
 
 
 # ────────────────────────────────────────
-# 增量探测 (用 ID 去重, 不用 crawl_time)
-# BUG-4 修复 (2026-07-23): crawler 会被 start_date=today 重新触达
-#   然后写 crawl_time=今天, 老记录也会变, 误判为新增.
-#   改成 id 锚点: 上次推过的 id 列表存 state, 本次只推 [上次没见过] ∩ [今天/未来发布]
+# 增告金额 / 过滤辅助
 # ────────────────────────────────────────
+# 老板要求群通报中只推“盐南、经开的未分类项目”.
+# 且这是与“全盐城采集”的二道闸门: crawler 采全盐城 (jszbcg 全盐城, sufu 盐南+经开
+# 校验问题), 增量采集脚本里再加一次过滤, 双保险.
+TARGET_DISTRICTS = {"盐南高新区", "盐南", "经开区", "经开", "盐城经济技术开发区"}
+
+
+def fetch_amount_for_record(site: str, notice_type: str, ntype_db: str = "notices") -> tuple:
+    """从 site db 取最新记录的金额 (tender→budget, award→winning_amount, intention→budget)."""
+    db_path = DATA_DIR / f"{site}.db"
+    if not db_path.exists():
+        return (None, None)
+    try:
+        c = sqlite3.connect(str(db_path))
+        cur = c.cursor()
+        column = None
+        if notice_type == "award":
+            column = "winning_amount"
+        else:
+            column = "budget"
+        # 仅查最近一条为了计算 unit 不取全部
+        cur.execute(f"SELECT {column}, budget_unit, budget_text FROM {ntype_db} WHERE notice_type=? ORDER BY crawl_time DESC LIMIT 1", (notice_type,))
+        row = cur.fetchone()
+        c.close()
+        if row and row[0] is not None:
+            return (float(row[0]), row[1] or row[2] or "元")
+    except Exception:
+        pass
+    return (None, None)
+
+
+def format_amount(amount: float, hint: str = None) -> str:
+    """金额格式化: 万元/亿元自动换, 原始单位从 hint (budget_unit) 取."""
+    if amount is None:
+        return "未公开"
+    if hint and "万" in str(hint):
+        return f"{amount:.2f} 万元"
+    if hint and "亿" in str(hint):
+        return f"{amount:.4f} 亿元"
+    # 元 (默认)
+    if amount >= 100000000:
+        return f"{amount / 100000000:.2f} 亿元"
+    if amount >= 10000:
+        return f"{amount / 10000:.2f} 万元"
+    return f"{amount:.0f} 元"
+
+
+def is_target_district(record: dict) -> bool:
+    """判断记录是否属于「盐南 / 经开」未分类项目."""
+    dist = record.get("std_district") or ""
+    cat = record.get("proj_major_cat") or ""
+    if cat:  # 有分类则不推 (老板要求“未分类”)
+        return False
+    # 多别名匹配
+    if dist in TARGET_DISTRICTS:
+        return True
+    if "盐南" in dist:
+        return True
+    if "经开" in dist or "开发区" in dist:
+        return True
+    return False
+
+
 def detect_new_since(last_per_site_ids: dict) -> list:
-    """扫描所有 site.db, 返回上次没记录过的 id (本批新增)."""
+    """扫描所有 site.db, 返回上次没记录过的 id (本批新增, 含所有区县, 后调用 is_target_district 过滤)."""
     from config import SITES, SITE_NAMES
     new_records = []
     for site in SITES:
@@ -203,7 +262,8 @@ def detect_new_since(last_per_site_ids: dict) -> list:
             cur = c.cursor()
             q = """
             SELECT id, site, notice_type, publish_date, project_name,
-                   purchaser, detail_url, std_district, proj_major_cat, page_path
+                   purchaser, detail_url, std_district, proj_major_cat, page_path,
+                   budget, winning_amount, budget_unit
             FROM notices
             WHERE is_duplicate = 0 AND page_path IS NOT NULL AND page_path != ''
             ORDER BY crawl_time ASC
@@ -213,6 +273,11 @@ def detect_new_since(last_per_site_ids: dict) -> list:
             for r in rows:
                 if r["id"] in seen_ids:
                     continue
+                # 金额字段按 notice_type 取
+                if r["notice_type"] == "award":
+                    amount_raw = r["winning_amount"]
+                else:
+                    amount_raw = r["budget"]
                 new_records.append({
                     "id": r["id"],
                     "site": r["site"],
@@ -225,6 +290,8 @@ def detect_new_since(last_per_site_ids: dict) -> list:
                     "std_district": r["std_district"],
                     "proj_major_cat": r["proj_major_cat"],
                     "page_path": r["page_path"],
+                    "amount_raw": amount_raw,
+                    "budget_unit": r["budget_unit"],
                 })
                 update_seen.append(r["id"])
             last_per_site_ids[site] = update_seen
@@ -277,27 +344,29 @@ def write_md_notify(new_records: list, batch_ts: str) -> list:
 
 
 def render_batch_message(new_records: list) -> str:
+    """通报格式: 网站 + 项目 + 金额 + MD. 老板 2026-07-23 最新要求."""
     by_site = {}
     for r in new_records:
         by_site.setdefault(r["site"], []).append(r)
     site_name_map = {r["site"]: r["site_name"] for r in new_records}
     lines = [
-        f"🚨 **盐城招标增量** {datetime.now().strftime('%H:%M')}",
-        f"本批新增 **{len(new_records)} 条** · 站点 {len(by_site)} 个",
+        f"🚨 **盐南/经开未分类新项目** {datetime.now().strftime('%H:%M')}",
+        f"本批 **{len(new_records)} 条** · 站点 {len(by_site)} 个",
         "",
     ]
     idx = 0
     for site, rows in by_site.items():
         sname = site_name_map.get(site, site)
-        lines.append(f"📦 **{sname}** ({len(rows)})")
+        dist_mark = f"{rows[0].get('std_district', '')}" if rows else ""
+        lines.append(f"📦 **{sname}** ({len(rows)} 条) {dist_mark}")
         for r in rows:
             idx += 1
-            pur = (r["purchaser"] or "-")[:30]
-            pname = (r["project_name"] or "(无)")[:50]
-            lines.append(f"`{idx:02d}` 📌 **{pur}**")
-            lines.append(f"   {pname}")
-            lines.append(f"   🔗 {r['detail_url']}")
+            pname = (r["project_name"] or "(无项目名)")[:80]
+            amount_text = format_amount(r.get("amount_raw"), r.get("budget_unit"))
+            ntype = r.get("notice_type", "?")
+            lines.append(f"`{idx:02d}` [{ntype}] **{pname}** · 💰 {amount_text}")
         lines.append("")
+    lines.append("📎 详情见下方 MD 附件 (按站分子目录)")
     return "\n".join(lines)
 
 
@@ -373,9 +442,11 @@ def main():
         state["last_slow_at"] = datetime.now().isoformat(timespec="seconds")
 
     # 探测新增
-    new_records = detect_new_since(last_per_site_ids)
+    all_new = detect_new_since(last_per_site_ids)
     batch_ts = datetime.now().strftime("%Y-%m-%d_%H%M")
-    log.info(f"[detect] 新增 {len(new_records)} 条")
+    # 群通报只推“盐南、经开未分类项目” (老板 2026-07-23 要要)
+    new_records = [r for r in all_new if is_target_district(r)]
+    log.info(f"[detect] 原始新增 {len(all_new)} 条 → 过滤后通报 {len(new_records)} 条 (盐南/经开 未分类)")
 
     # 写游标
     state["last_per_site_ids"] = last_per_site_ids
