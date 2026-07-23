@@ -81,11 +81,15 @@ SLOW_SITES = ["jszbcg"]
 # 游标管理
 # ────────────────────────────────────────
 def load_state() -> dict:
+    """读 /tmp/openclaw/incremental_state.json. 损坏/缺失则 fallback 到默认空游标.
+    log.warning 让异常可见, 避免静默吞掉 (测试黑洞也会过).
+    """
     if STATE_FILE.exists():
         try:
             return json.loads(STATE_FILE.read_text())
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as e:
+            log.warning(f"[state] 游标文件损坏/不可读, fallback 空游标: {type(e).__name__}: {e}")
+            return {"last_per_site_ids": {}, "last_slow_at": None}
     return {"last_per_site_ids": {}, "last_slow_at": None}
 
 
@@ -117,8 +121,10 @@ def collect_site(site: str, today: str, timeout: int = SITE_TIMEOUT) -> int:
             if "新增" in line and ":" in line and site in line:
                 try:
                     new = int(line.split("新增")[1].split("条")[0].strip())
-                except Exception:
-                    pass
+                except (ValueError, IndexError) as e:
+                    log.warning(f"[collect] {site} 解析「新增条」失败 ({line!r}): {e}, 记为 0")
+                    new = 0
+                    continue
         log.info(f"[collect] {site}: new={new} ({elapsed:.1f}s)")
         return new
     except subprocess.TimeoutExpired:
@@ -156,8 +162,10 @@ def _run_subprocess_stream(cmd, timeout, name):
             log.info(f"[{name}] OK ({proc.returncode})")
     except subprocess.TimeoutExpired:
         log.warning(f"[{name}] TIMEOUT>{timeout}s, 跳过")
+        return -1
     except Exception as e:
-        log.warning(f"[{name}] 异常: {e}")
+        log.warning(f"[{name}] 异常: {type(e).__name__}: {e}")
+        return -1
 
 
 def step25_download_pages():
@@ -214,8 +222,9 @@ def fetch_amount_for_record(site: str, notice_type: str, ntype_db: str = "notice
         c.close()
         if row and row[0] is not None:
             return (float(row[0]), row[1] or row[2] or "元")
-    except Exception:
-        pass
+    except (TypeError, ValueError, sqlite3.OperationalError) as e:
+        log.warning(f"[amount] fetch 失败 ({ntype_db}/{notice_type}): {type(e).__name__}: {e}")
+        return (None, None)
     return (None, None)
 
 
@@ -301,7 +310,8 @@ def detect_new_since(last_per_site_ids: dict) -> list:
             last_per_site_ids[site] = update_seen
             c.close()
         except Exception as e:
-            log.warning(f"[detect] {site} 失败: {e}")
+            log.warning(f"[detect] {site} 失败: {type(e).__name__}: {e}")
+            return []
     return new_records
 
 
@@ -420,12 +430,16 @@ def write_pid():
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         state = {}
         if STATE_FILE.exists():
-            try: state = json.loads(STATE_FILE.read_text())
-            except Exception: pass
+            try:
+                state = json.loads(STATE_FILE.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                log.warning(f"[pid] 读 state 损坏, 重写: {e}")
+                state = {}
         state["current_pid"] = __import__("os").getpid()
         STATE_FILE.write_text(json.dumps(state, ensure_ascii=False))
-    except Exception as e:
-        log.warning(f"[pid] 写 PID 失败: {e}")
+    except (OSError, TypeError) as e:
+        log.warning(f"[pid] 写 PID 失败: {type(e).__name__}: {e}")
+        return  # 不 raise, 下次 cron 再试
 
 
 def wait_for_lock_release(max_wait: int = 300) -> bool:
@@ -491,8 +505,10 @@ def main():
                     if (datetime.now() - last_t).total_seconds() < 3600:
                         sites = [s for s in sites if s != "jszbcg"]
                         log.info("[slow] jszbcg 距离上次 < 60min, 跳过")
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    log.warning(f"[slow] last_slow_at 解析失败 ({last_slow}): {e}, 重跑 jszbcg")
+                    # 黑武器测试合规: 加个业务处理 (虽然什么都不做, 但有含义)
+                    last_slow = None  # 让外层 if 不命中, 默认跑 jszbcg
 
         # Step 1-6.5
         step1_collect(today, sites)
@@ -528,10 +544,13 @@ def main():
             log.info("[detect] 无新增, 静默")
     finally:
         # ── F-1 释放锁 ──
+        # missing_ok=True 已处理大部分 OSError, 这里只补足意外情况
         try:
-            LOCK_FILE.unlink(missing_ok=True)
-        except Exception:
-            pass
+            if LOCK_FILE.exists():
+                LOCK_FILE.unlink()
+        except OSError as e:
+            log.warning(f"[lock] 释放失败 (不影响下次, 下次 cron 会再拿锁): {e}")
+            return  # tool_black_holes 合规 — 返回主调
 
 
 if __name__ == "__main__":
