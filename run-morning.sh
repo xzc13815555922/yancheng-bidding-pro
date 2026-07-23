@@ -21,9 +21,9 @@ PYTHON="/usr/bin/python3"
 LOCK_FILE="/tmp/openclaw/ybp-collect.lock"
 LOG_FILE="/tmp/openclaw/morning-$(date +%Y%m%d_%H%M%S).log"
 
-# —— 临时锁 —— 多 cron 互斥
+# —— 临时锁 —— 多 cron 互斥 (macOS 没 /usr/bin/flock, 用本项目 flock.py)
 exec 9>"$LOCK_FILE"
-if ! /usr/bin/flock -n 9; then
+if ! /Users/yc/.openclaw/workspace/yancheng-bidding-pro/flock.py -n "$LOCK_FILE" true; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚠️ 另一个采通仍在跑, run-morning 退出 (由下次 cron 接手)"
     exit 0
 fi
